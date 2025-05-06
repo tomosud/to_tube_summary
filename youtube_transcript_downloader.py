@@ -69,15 +69,9 @@ def download_and_slice_image(url, video_id, start_time, duration, cols, rows, fr
                 right = left + cell_width
                 bottom = top + cell_height
                 
-                # セル画像を切り出し
+                # セル画像を切り出して保存
                 cell = img.crop((left, top, right, bottom))
-                
-                # 元のアスペクト比を維持したまま、適切なサイズにリサイズ
-                target_height = 180  # 標準的なセルの高さ
-                aspect_ratio = cell.size[0] / cell.size[1]  # 幅/高さ
-                target_width = int(target_height * aspect_ratio)
-                cell = cell.resize((target_width, target_height), Image.Resampling.LANCZOS)
-                print(f"セルサイズを調整: {cell.size[0]}x{cell.size[1]} (アスペクト比: {aspect_ratio:.2f})")
+                print(f"セルサイズ: {cell.size[0]}x{cell.size[1]}")
                 
                 # グリッドポジションからタイムスタンプを計算
                 cell_index = row * cols + col
