@@ -247,14 +247,19 @@ def download_transcript(video_id, output_dir):
                     transcript_language = '英語（US）'
                 print(f"{transcript_language}字幕が見つかりました")
             except Exception as e:
-                print("\n利用可能な字幕言語:")
+                print("\n--利用可能な字幕言語:")
+                tcode = None
+
                 for t in transcript_list:
                     print(f"- {t.language} ({t.language_code})")
-                raise Exception("日本語・英語の字幕が見つかりませんでした。")
-        
-        if not transcript:
-            print("字幕を取得できませんでした。")
-            return None
+
+                    tcode = t.language_code
+                #raise Exception("日本語・英語の字幕が見つかりませんでした。")
+
+                    transcript = transcript_list.find_transcript([tcode]).fetch()   
+                    print(f"{tcode}字幕が見つかりました")
+                # その他の言語字幕を試す（日本語・英語が見つからなかった場合）
+
         
         # VTT形式に変換
         print("VTT形式に変換中...")
@@ -339,7 +344,6 @@ if __name__ == "__main__":
             sys.exit(1)
             
 
-
         # タイトルを取得してディレクトリを作成
         video_title = get_youtube_title(video_id)
         if not video_title:
@@ -368,7 +372,7 @@ if __name__ == "__main__":
                 print(f"要約HTMLが作成されました: {html_path}")
                 
                 # VTTファイルを削除
-                os.remove(result)
+                #os.remove(result)
                 print("VTTファイルを削除しました")
                 
                 # HTMLをブラウザで開く
