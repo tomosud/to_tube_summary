@@ -11,6 +11,8 @@ import yt_dlp
 from PIL import Image
 import io
 
+import html
+import unicodedata
 
 BASE_DIR = r"C:\temp\html"
 
@@ -26,7 +28,7 @@ def create_output_dirs(title):
     
     return output_dir, images_dir
 
-def download_and_slice_image(url, video_id, start_time, duration, width, height, cols, rows, fragment_idx):
+def download_and_slice_image(url, video_id, start_time, duration, cols, rows, fragment_idx, base_cell_size):
     """画像をダウンロードしてスライスする"""
     try:
         # 画像をダウンロード
@@ -48,10 +50,9 @@ def download_and_slice_image(url, video_id, start_time, duration, width, height,
         actual_width, actual_height = img.size
         print(f"実際の画像サイズ: {actual_width}x{actual_height}")
         
-        # 1つのセルのサイズを計算（実際の画像サイズから）
-        cell_width = actual_width // cols
-        cell_height = actual_height // rows
-        print(f"セルサイズ: {cell_width}x{cell_height}, 分割: {cols}x{rows}")
+        # 基準のセルサイズを使用
+        cell_width, cell_height = base_cell_size
+        print(f"基準セルサイズ: {cell_width}x{cell_height}, 分割: {cols}x{rows}")
         
         # 1セルあたりの時間を計算（デュレーションを総セル数で割る）
         cells_count = cols * rows
@@ -71,12 +72,12 @@ def download_and_slice_image(url, video_id, start_time, duration, width, height,
                 # セル画像を切り出し
                 cell = img.crop((left, top, right, bottom))
                 
-                # アスペクト比を確認し、必要に応じて調整（高さが標準より小さい場合）
-                expected_height = 180  # 標準的なセルの高さ
-                if cell.size[1] < expected_height:
-                    # 画像を標準サイズにリサイズ（アスペクト比を維持）
-                    cell = cell.resize((cell.size[0], expected_height), Image.Resampling.LANCZOS)
-                    print(f"セルサイズを調整: {cell.size[0]}x{cell.size[1]}")
+                # 元のアスペクト比を維持したまま、適切なサイズにリサイズ
+                target_height = 180  # 標準的なセルの高さ
+                aspect_ratio = cell.size[0] / cell.size[1]  # 幅/高さ
+                target_width = int(target_height * aspect_ratio)
+                cell = cell.resize((target_width, target_height), Image.Resampling.LANCZOS)
+                print(f"セルサイズを調整: {cell.size[0]}x{cell.size[1]} (アスペクト比: {aspect_ratio:.2f})")
                 
                 # グリッドポジションからタイムスタンプを計算
                 cell_index = row * cols + col
@@ -128,6 +129,22 @@ def dl_images(url, images_dir):
         print(f"分割: {sb1_format['columns']}列 × {sb1_format['rows']}行")
         print(f"フラグメント数: {len(sb1_format['fragments'])}")
         
+        # 最初のフラグメントから基準となるセルサイズを計算
+        try:
+            # 最初のフラグメントの画像を取得
+            first_response = requests.get(sb1_format['fragments'][0]['url'])
+            if first_response.status_code == 200:
+                first_img = Image.open(io.BytesIO(first_response.content))
+                base_width = first_img.size[0] // sb1_format['columns']
+                base_height = first_img.size[1] // sb1_format['rows']
+                base_cell_size = (base_width, base_height)
+                print(f"基準セルサイズを設定: {base_width}x{base_height}")
+            else:
+                raise Exception("最初のフラグメントの取得に失敗しました")
+        except Exception as e:
+            print(f"⚠️ 基準セルサイズの計算エラー: {str(e)}")
+            return []
+        
         all_images = []
         current_time = 0
         
@@ -141,11 +158,10 @@ def dl_images(url, images_dir):
                 video_id,
                 current_time,
                 fragment['duration'],
-                sb1_format['width'],
-                sb1_format['height'],
                 sb1_format['columns'],
                 sb1_format['rows'],
-                idx
+                idx,
+                base_cell_size
             )
             
             all_images.extend(images)
@@ -157,20 +173,56 @@ def dl_images(url, images_dir):
         print("⚠️ ストーリーボード形式が見つかりませんでした")
         return []
 
+def sanitize_filename(title):
+    """タイトルをファイル名やURLの一部に安全に使えるように変換"""
+    if not title:
+        return ""
+    
+    print(f"元のタイトル: {title}")
 
+    # HTMLエンティティをデコード
+    title = html.unescape(title)
+
+    # Unicodeの制御文字などを除去（ゼロ幅スペースなど）
+    title = ''.join(ch for ch in title if unicodedata.category(ch)[0] != 'C')
+
+    # ファイル名やURLで使えない/紛らわしい文字を除去
+    title = re.sub(r'[\\/*?:"<>|&=%#@!`~^\[\]{}();\'\",。、「」‘’“”].', "", title)
+
+    # 半角スペースや全角スペースをアンダースコアに
+    title = re.sub(r'\s+', '_', title)
+
+    # 連続するアンダースコアは1つにまとめる
+    title = re.sub(r'_+', '_', title)
+
+    # 前後のアンダースコアを削除
+    title = title.strip('_')
+
+    title = title.replace(".", "")
+
+    # 長すぎるタイトルは切り詰める（パス長制限やURL長対策）
+    if len(title) > 100:
+        title = title[:97] + "..."
+
+    print(f"加工後のタイトル: {title}")
+
+    return title
+'''
 def sanitize_filename(title):
     """ファイル名に使用できない文字を除去"""
     if not title:
         return ""
-    
+    print (f"元のタイトル: {title}")
     # HTMLエンティティをデコード
     title = title.replace("&quot;", "")
     title = title.replace("&amp;", "and")
     title = title.replace("&lt;", "")
     title = title.replace("&gt;", "")
-    
+
+    title = title.replace("&#39;", " ")
+  
     # ファイル名に使用できない文字を除去
-    title = re.sub(r'[\\/*?:"<>|!%&=\']', "", title)
+    title = re.sub(r'[\\/*?:"<>|!%&=\'].;:', "", title)
     
     # スペースをアンダースコアに置換
     title = title.replace(" ", "_")
@@ -180,7 +232,7 @@ def sanitize_filename(title):
         title = title[:97] + "..."
         
     return title
-
+'''
 def get_video_id(url):
     """URLから動画IDを抽出"""
     pattern = r'(?:v=|\/)([0-9A-Za-z_-]{11}).*'

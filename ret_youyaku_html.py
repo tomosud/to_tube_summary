@@ -95,7 +95,7 @@ def txt_to_html(lines, output_html_path, urlbase="", images=None):
         'a { color: #2980b9; text-decoration: none; }',
         '.timestamp-section { margin: 1em 0; }',
         '.timestamp-images { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-bottom: 1em; }',
-        '.timestamp-image { width: 100%; height: 120px; object-fit: cover; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }',
+        '.timestamp-image { width: 100%; height: 120px; object-fit: contain; background: #eee; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }',
         '.timestamp-content { width: 100%; }',
         '</style>',
         '</head>',
