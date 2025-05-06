@@ -1,6 +1,10 @@
 # YouTube動画要約ツール
 
 Windowsで動作するYouTube動画の要約ツールです。YouTubeのURLをクリップボードにコピーして実行すると、その動画の内容を要約したHTMLファイルを生成します。
+要約にはgeminiを使用します。またYouTubeのstoryboardからサムネイルを作成します。
+
+![image](https://github.com/user-attachments/assets/51177fbd-f2d7-4e65-a5b6-998de72b5376)
+
 
 ## 必要なもの
 
