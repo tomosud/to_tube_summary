@@ -193,7 +193,7 @@ def sanitize_filename(title):
     title = title.strip('_')
 
     title = title.replace(".", "")
-
+    title = title.replace("\"", "")
     # 長すぎるタイトルは切り詰める（パス長制限やURL長対策）
     if len(title) > 100:
         title = title[:97] + "..."
@@ -428,9 +428,11 @@ if __name__ == "__main__":
                 print(f"要約処理でエラーが発生しました: {str(e)}")
         else:
             print("字幕の取得に失敗しました")
+            input("Enterキーを押して終了...")
             
     except Exception as e:
         print(f"予期せぬエラー: {str(e)}")
+        input("Enterキーを押して終了...")
     finally:
         #input("Enterキーを押して終了...")
         sys.exit(0)
