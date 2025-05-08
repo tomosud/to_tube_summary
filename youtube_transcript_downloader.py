@@ -14,6 +14,8 @@ import io
 import html
 import unicodedata
 
+import urllib.parse
+
 BASE_DIR = r"C:\temp\html"
 
 def create_output_dirs(title):
@@ -168,65 +170,36 @@ def dl_images(url, images_dir):
         return []
 
 def sanitize_filename(title):
-    """タイトルをファイル名やURLの一部に安全に使えるように変換"""
+    """ファイル名・フォルダ名・URLやクエリ引数としても安全な文字列に変換"""
     if not title:
         return ""
-    
-    print(f"元のタイトル: {title}")
 
     # HTMLエンティティをデコード
     title = html.unescape(title)
 
-    # Unicodeの制御文字などを除去（ゼロ幅スペースなど）
+    # 制御文字（ゼロ幅スペースなど）を除去
     title = ''.join(ch for ch in title if unicodedata.category(ch)[0] != 'C')
 
-    # ファイル名やURLで使えない/紛らわしい文字を除去
-    title = re.sub(r'[\\/*?:"<>|&=%#@!`~^\[\]{}();\'\",。、「」‘’“”].', "", title)
+    # 記号・特殊文字の除去（全角記号含む）
+    # 英数字、ひらがな、カタカナ、漢字、一部の記号（-_）以外を除去
+    title = re.sub(r'[^\w\-一-龯ぁ-んァ-ヶー]', '_', title)
 
-    # 半角スペースや全角スペースをアンダースコアに
-    title = re.sub(r'\s+', '_', title)
-
-    # 連続するアンダースコアは1つにまとめる
+    # 連続するアンダースコアを1つにまとめる
     title = re.sub(r'_+', '_', title)
 
     # 前後のアンダースコアを削除
     title = title.strip('_')
 
-    title = title.replace(".", "")
-    title = title.replace("\"", "")
-    # 長すぎるタイトルは切り詰める（パス長制限やURL長対策）
-    if len(title) > 100:
-        title = title[:97] + "..."
+    # 長すぎる文字列をカット（ファイル名制限: 255文字、URL用ならより短くても可）
+    max_length = 100
+    if len(title) > max_length:
+        title = title[:max_length]
 
-    print(f"加工後のタイトル: {title}")
+    # 最後にURLエンコード（クエリパラメータなどにも安全）
+    safe_title = urllib.parse.quote(title, safe='')
 
-    return title
-'''
-def sanitize_filename(title):
-    """ファイル名に使用できない文字を除去"""
-    if not title:
-        return ""
-    print (f"元のタイトル: {title}")
-    # HTMLエンティティをデコード
-    title = title.replace("&quot;", "")
-    title = title.replace("&amp;", "and")
-    title = title.replace("&lt;", "")
-    title = title.replace("&gt;", "")
+    return safe_title
 
-    title = title.replace("&#39;", " ")
-  
-    # ファイル名に使用できない文字を除去
-    title = re.sub(r'[\\/*?:"<>|!%&=\'].;:', "", title)
-    
-    # スペースをアンダースコアに置換
-    title = title.replace(" ", "_")
-    
-    # 長すぎるタイトルを切り詰める（Windowsのパス長制限対策）
-    if len(title) > 100:
-        title = title[:97] + "..."
-        
-    return title
-'''
 def get_video_id(url):
     """URLから動画IDを抽出"""
     pattern = r'(?:v=|\/)([0-9A-Za-z_-]{11}).*'
