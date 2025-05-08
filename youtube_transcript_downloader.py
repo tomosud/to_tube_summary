@@ -170,35 +170,35 @@ def dl_images(url, images_dir):
         return []
 
 def sanitize_filename(title):
-    """ファイル名・フォルダ名・URLやクエリ引数としても安全な文字列に変換"""
+    """ファイル名・URLに使えて、日本語も読める形で安全な文字列を返す"""
     if not title:
         return ""
 
-    # HTMLエンティティをデコード
+    # HTMLエンティティのデコード
     title = html.unescape(title)
 
-    # 制御文字（ゼロ幅スペースなど）を除去
+    # 制御文字を除去
     title = ''.join(ch for ch in title if unicodedata.category(ch)[0] != 'C')
 
-    # 記号・特殊文字の除去（全角記号含む）
-    # 英数字、ひらがな、カタカナ、漢字、一部の記号（-_）以外を除去
-    title = re.sub(r'[^\w\-一-龯ぁ-んァ-ヶー]', '_', title)
+    # 記号をアンダースコアに置き換え
+    # ここでは、ほとんどの記号や特殊文字を除去・置換
+    title = re.sub(r'[\\/*?:"<>|&=%#@!`~^\[\]{}();\'\",。、「」‘’“”…]', '', title)
 
-    # 連続するアンダースコアを1つにまとめる
+    # 空白をアンダースコアに
+    title = re.sub(r'\s+', '_', title)
+
+    # 連続するアンダースコアを1つに
     title = re.sub(r'_+', '_', title)
 
-    # 前後のアンダースコアを削除
+    # 前後のアンダースコアを除去
     title = title.strip('_')
 
-    # 長すぎる文字列をカット（ファイル名制限: 255文字、URL用ならより短くても可）
+    # 長さ制限（ファイル名の長さ上限 255文字以下）
     max_length = 100
     if len(title) > max_length:
         title = title[:max_length]
 
-    # 最後にURLエンコード（クエリパラメータなどにも安全）
-    safe_title = urllib.parse.quote(title, safe='')
-
-    return safe_title
+    return title
 
 def get_video_id(url):
     """URLから動画IDを抽出"""
