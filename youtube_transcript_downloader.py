@@ -169,6 +169,10 @@ def dl_images(url, images_dir):
         print("⚠️ ストーリーボード形式が見つかりませんでした")
         return []
 
+import re
+import html
+import unicodedata
+
 def sanitize_filename(title):
     """ファイル名・URLに使えて、日本語も読める形で安全な文字列を返す"""
     if not title:
@@ -180,9 +184,8 @@ def sanitize_filename(title):
     # 制御文字を除去
     title = ''.join(ch for ch in title if unicodedata.category(ch)[0] != 'C')
 
-    # 記号をアンダースコアに置き換え
-    # ここでは、ほとんどの記号や特殊文字を除去・置換
-    title = re.sub(r'[\\/*?:"<>|&=%#@!`~^\[\]{}();\'\",。、「」‘’“”…]', '', title)
+    # 記号を除去（ピリオド含む）
+    title = re.sub(r'[\\/*?:"<>|&=%#@!`~^.\[\]{}();\'\",。、「」‘’“”…]', '', title)
 
     # 空白をアンダースコアに
     title = re.sub(r'\s+', '_', title)
@@ -199,6 +202,7 @@ def sanitize_filename(title):
         title = title[:max_length]
 
     return title
+
 
 def get_video_id(url):
     """URLから動画IDを抽出"""
