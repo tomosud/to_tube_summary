@@ -30,7 +30,7 @@ def create_output_dirs(title):
     
     return output_dir, images_dir
 
-def download_and_slice_image(url, video_id, start_time, duration, cols, rows, fragment_idx, base_cell_size, images_dir):
+def download_and_slice_image(url, video_id, start_time, duration, cols, rows, fragment_idx, base_cell_size):
     """画像をダウンロードしてスライスする"""
     try:
         # 画像をダウンロード
@@ -109,7 +109,7 @@ def dl_images(url, images_dir):
     
     Returns:
         list[tuple]: [(filepath, start_time, end_time), ...]
-    """    # images_dirをパラメータとして受け取る
+    """
     
     with yt_dlp.YoutubeDL({'skip_download': True}) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -147,7 +147,8 @@ def dl_images(url, images_dir):
         # 各フラグメントを処理
         for idx, fragment in enumerate(sb1_format['fragments']):
             print(f"フラグメント {idx + 1}/{len(sb1_format['fragments'])} を処理中...")
-              # 画像をダウンロードしてスライス
+            
+            # 画像をダウンロードしてスライス
             images = download_and_slice_image(
                 fragment['url'],
                 video_id,
@@ -156,8 +157,7 @@ def dl_images(url, images_dir):
                 sb1_format['columns'],
                 sb1_format['rows'],
                 idx,
-                base_cell_size,
-                images_dir
+                base_cell_size
             )
             
             all_images.extend(images)
@@ -168,6 +168,10 @@ def dl_images(url, images_dir):
     else:
         print("⚠️ ストーリーボード形式が見つかりませんでした")
         return []
+
+import re
+import html
+import unicodedata
 
 def sanitize_filename(title):
     """ファイル名・URLに使えて、日本語も読める形で安全な文字列を返す"""
@@ -181,7 +185,7 @@ def sanitize_filename(title):
     title = ''.join(ch for ch in title if unicodedata.category(ch)[0] != 'C')
 
     # 記号を除去（ピリオド含む）
-    title = re.sub(r'[\\/*?:"<>|&=%#@!`~^.\[\]{}();\'\",。、「」''""…]', '', title)
+    title = re.sub(r'[\\/*?:"<>|&=%#@!`~^.\[\]{}();\'\",。、「」‘’“”…]', '', title)
 
     # 空白をアンダースコアに
     title = re.sub(r'\s+', '_', title)
@@ -383,55 +387,6 @@ def is_running_from_bat():
     """batファイルから実行されているかどうかを判定"""
     return "--from-bat" in sys.argv
 
-def process_video(url):
-    """動画処理のメインロジック"""
-    video_id = get_video_id(url)
-    
-    if not video_id:
-        print("有効なYouTube URLではありません")
-        return False
-    
-    # タイトルを取得してディレクトリを作成
-    video_title = get_youtube_title(video_id)
-    if not video_title:
-        video_title = video_id
-    safe_title = sanitize_filename(video_title)
-    
-    # 出力ディレクトリを作成
-    output_dir, images_dir = create_output_dirs(safe_title)
-    
-    # 字幕を処理
-    result = download_transcript(video_id, output_dir)
-    
-    if result:
-        print(f"字幕が保存されました: {result}")
-        
-        # 要約処理の実行
-        print("\n要約処理を開始します...")
-        try:
-            video_url = f"https://www.youtube.com/watch?v={video_id}&t="
-            
-            # 画像をダウンロードしてスライス（1回のみ実行）
-            print("\nストーリーボード画像の処理を開始...")
-            images = dl_images(url, images_dir)
-            html_path = create_summary(result, video_title, output_dir, video_url, images)
-            print(f"要約HTMLが作成されました: {html_path}")
-            
-            # VTTファイルを削除
-            #os.remove(result)
-            print("VTTファイルを削除しました")
-            
-            # HTMLをブラウザで開く
-            os.startfile(html_path)
-            print("ブラウザでHTMLを開きました")
-            return True
-        except Exception as e:
-            print(f"要約処理でエラーが発生しました: {str(e)}")
-            return False
-    else:
-        print("字幕の取得に失敗しました")
-        return False
-
 if __name__ == "__main__":
     print("=== YouTube字幕ダウンローダー (Transcript API版) ===")
     try:
@@ -449,22 +404,79 @@ if __name__ == "__main__":
             except:
                 url = input("YouTube動画のURLを入力してください: ").strip()
         
-        # 動画処理を実行
-        while True:
-            if process_video(url):
-                # 処理成功
-                break
-            else:
-                # 処理失敗 - リトライするか確認
-                retry = input("\nEnterキーを押してリトライ、他のキーを押して終了...")
-                if retry.strip() == "":
-                    print(f"\n同じURL({url})でリトライします...")
-                    continue
-                else:
-                    break
+        
+        video_id = get_video_id(url)
+        
+        if not video_id:
+            print("有効なYouTube URLではありません")
+            input("Enterキーを押して終了...")
+            sys.exit(1)
+                # タイトルを取得してディレクトリを作成
+        video_title = get_youtube_title(video_id)
+        if not video_title:
+            video_title = video_id
+        safe_title = sanitize_filename(video_title)
+        
+        # 出力ディレクトリを作成
+        output_dir, images_dir = create_output_dirs(safe_title)
+        
+        # 字幕処理を行う関数
+        def process_subtitle():
+            result = download_transcript(video_id, output_dir)
+            if result:
+                print(f"字幕が保存されました: {result}")
+                
+                # 要約処理の実行
+                print("\n要約処理を開始します...")
+                try:
+                    video_url = f"https://www.youtube.com/watch?v={video_id}&t="
                     
+                    # 画像をダウンロードしてスライス（1回のみ実行）
+                    print("\nストーリーボード画像の処理を開始...")
+                    images = dl_images(url, images_dir)
+                    html_path = create_summary(result, video_title, output_dir, video_url, images)
+                    print(f"要約HTMLが作成されました: {html_path}")
+                    
+                    # VTTファイルを削除
+                    #os.remove(result)
+                    print("VTTファイルを削除しました")
+                    
+                    # HTMLをブラウザで開く
+                    os.startfile(html_path)
+                    print("ブラウザでHTMLを開きました")
+                    return True
+                except Exception as e:
+                    print(f"要約処理でエラーが発生しました: {str(e)}")
+                    return False
+            else:
+                print("字幕の取得に失敗しました")
+                return False
+        
+        # 最初の処理実行
+        success = process_subtitle()
+        
+        # 失敗した場合のリトライ処理
+        if not success:
+            retry = input("Enterキーを押してリトライ、他のキーを押して終了...")
+            if retry.strip() == "":
+                print("\n同じURLでリトライします: " + url)
+                process_subtitle()
+                        print("\nストーリーボード画像の処理を開始...")
+                        images = dl_images(url, images_dir)
+                        html_path = create_summary(result, video_title, output_dir, video_url, images)
+                        print(f"要約HTMLが作成されました: {html_path}")
+                        
+                        # HTMLをブラウザで開く
+                        os.startfile(html_path)
+                        print("ブラウザでHTMLを開きました")
+                    except Exception as e:
+                        print(f"要約処理でエラーが発生しました: {str(e)}")
+                else:
+                    print("字幕の取得に再度失敗しました")
+            
     except Exception as e:
         print(f"予期せぬエラー: {str(e)}")
         input("Enterキーを押して終了...")
     finally:
+        #input("Enterキーを押して終了...")
         sys.exit(0)
