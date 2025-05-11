@@ -78,7 +78,7 @@ def find_matching_images(timestamp_seconds, images, window_seconds=30):
         filepath, start_time, end_time = image
         # タイムスタンプの前後window_seconds秒以内の画像を含める
         if (start_time - window_seconds <= timestamp_seconds <= end_time + window_seconds):
-            matching_images.append(filepath)
+            matching_images.append((filepath, start_time, end_time))
     
     return matching_images[:6]  # 最大6枚まで表示
 
@@ -92,9 +92,9 @@ def txt_to_html(lines, output_html_path, urlbase="", images=None):
         'li { margin-bottom: 0.3em; }',
         'p { margin-top: 0.8em; }',
         'a { color: #4fc3f7; text-decoration: none; }','.timestamp-section { margin: 1em 0; }',
-        '.timestamp-images { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin: 1.5em 0; }',
-        '.timestamp-image { width: 100%; aspect-ratio: 16/9; object-fit: contain; background: #eee; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: transform 0.3s ease, box-shadow 0.3s ease; }',
-        '.timestamp-image:hover { transform: scale(2); z-index: 10; box-shadow: 0 8px 16px rgba(0,0,0,0.2); }',
+        '.timestamp-images { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin: 1.5em 0; }',        '.timestamp-image { width: 100%; aspect-ratio: 16/9; object-fit: contain; background: #eee; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: transform 0.3s ease, box-shadow 0.3s ease; cursor: pointer; }',
+        '.timestamp-image:hover { transform: scale(2); z-index: 10; box-shadow: 0 8px 16px rgba(0,0,0,0.2); border: 2px solid #ff9800; }',
+        '.timestamp-images a { display: block; position: relative; }',
         '.timestamp-content { width: 100%; }',
         '</style>',
         '</head>',
@@ -116,19 +116,27 @@ def txt_to_html(lines, output_html_path, urlbase="", images=None):
             jump_url = f"{urlbase}{total_seconds}"
             timestamp_html = f'<p><a href="{jump_url}" target="_blank">▶ 動画リンク</a></p>'
             line = re.sub(r"\*\*(\d+分\d+秒頃)\*\*", r"\1", line)
-            
-            # タイムスタンプに対応する画像を探す
+              # タイムスタンプに対応する画像を探す
             if images:
                 image_paths = find_matching_images(total_seconds, images)
                 if image_paths:
                     matching_image = '<div class="timestamp-images">'
-                    for path in image_paths:
+                    for image_info in image_paths:
                         # 相対パスに変換
+                        path, img_start_time, img_end_time = image_info
                         rel_path = os.path.relpath(
                             path,
                             os.path.dirname(output_html_path)
                         ).replace('\\', '/')
-                        matching_image += f'<img src="{rel_path}" class="timestamp-image" alt="Screenshot at {match.group(1)}:{match.group(2)}">'
+                        
+                        # この画像自身の時間に対応するリンクを作成
+                        img_jump_url = f"{urlbase}{int(img_start_time)}"
+                        
+                        # 画像の時間を分と秒に変換
+                        img_minutes = int(img_start_time) // 60
+                        img_seconds = int(img_start_time) % 60
+                        
+                        matching_image += f'<a href="{img_jump_url}" target="_blank"><img src="{rel_path}" class="timestamp-image" alt="Screenshot at {img_minutes}:{img_seconds}" title="クリックして{img_minutes}分{img_seconds}秒の動画を開く"></a>'
                     matching_image += '</div>'
 
         content_html = ""
