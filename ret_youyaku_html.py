@@ -158,8 +158,11 @@ def txt_to_html(lines, output_html_path, urlbase="", images=None):
             if not in_list:
                 content_html += "<ul>"
                 in_list = True
-            line = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", line)
-            content_html += f"<li>{line[1:].strip()}</li>"
+            # 先に最初の*を削除してからテキスト処理
+            clean_line = line[1:].strip()
+            # 太字の処理
+            clean_line = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", clean_line)
+            content_html += f"<li>{clean_line}</li>"
         elif line.startswith("http://") or line.startswith("https://"):
             if in_list:
                 content_html += "</ul>"
