@@ -61,7 +61,7 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None):
     responseA = chat.send_message(f1text)
 
     # 回答を踏まえた次の質問
-    responseB = chat.send_message("では、その内容の頭に興味深いポイントを足したいのでまとめて。200文字程度で日本語で。「動画のポイント」という見出しを付けて。この講演に興味を持つ人が特記したいような内容を。全般的でなくとも、特徴的な点を。またこっちは文末に「以上」は不要")
+    responseB = chat.send_message("では、その内容の興味深いポイントをまとめて。200文字程度で日本語で。「動画のポイント」という見出しを付けて。この講演に興味を持つ人が特記したいような内容を。全般的でなくとも、特徴的な点を。またこっちは文末に「以上」は不要。")
 
     result = responseB.text.split('\n') + ['\n'] + [url_base] + responseA.text.split('\n')
     
