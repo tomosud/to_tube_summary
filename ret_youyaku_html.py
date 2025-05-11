@@ -68,17 +68,54 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None):
     # HTMLファイルを生成
     txt_to_html(result, output_html_path, url_base, images)
 
-def find_matching_images(timestamp_seconds, images, window_seconds=30):
-    """タイムスタンプの前後の画像を取得"""
+def extract_timestamp(line):
+    """行から時間情報を抽出する"""
+    match = re.search(r"(\d+)分(\d+)秒頃", line)
+    if match:
+        minutes = int(match.group(1))
+        seconds = int(match.group(2))
+        return minutes * 60 + seconds
+    return None
+
+def find_matching_images(current_time, next_time, images):
+    """指定した時間範囲内の画像を取得する"""
     if not images:
         return []
     
+    # 次の見出しの時間が指定されていない場合は、現在時刻から5分後までを範囲とする
+    end_time = next_time if next_time is not None else current_time + 300
+    
+    # 現在の見出しから次の見出しまでの時間範囲内の画像を探す
     matching_images = []
     for image in images:
-        filepath, start_time, end_time = image
-        # タイムスタンプの前後window_seconds秒以内の画像を含める
-        if (start_time - window_seconds <= timestamp_seconds <= end_time + window_seconds):
-            matching_images.append((filepath, start_time, end_time))
+        filepath, img_start_time, img_end_time = image
+        # 画像の時間範囲が見出しの時間範囲と重なっているかチェック
+        if (img_start_time <= end_time and img_end_time >= current_time):
+            matching_images.append((filepath, img_start_time, img_end_time))
+    
+    # 時間でソート
+    matching_images.sort(key=lambda x: x[1])
+    
+    # 画像が6枚未満の場合、前後の時間帯も含めて探す
+    if len(matching_images) < 6:
+        window_seconds = 60  # 1分
+        extended_matches = []
+        for image in images:
+            filepath, img_start_time, img_end_time = image
+            if (img_start_time <= current_time + window_seconds and 
+                img_end_time >= current_time - window_seconds and
+                (filepath, img_start_time, img_end_time) not in matching_images):
+                extended_matches.append((filepath, img_start_time, img_end_time))
+        
+        # 追加の画像も時間でソート（現在時刻からの距離で）
+        extended_matches.sort(key=lambda x: abs(x[1] - current_time))
+        
+        # 必要な数だけ追加
+        remaining_slots = 6 - len(matching_images)
+        matching_images.extend(extended_matches[:remaining_slots])
+        
+        # 最終的な時間順でソート
+        matching_images.sort(key=lambda x: x[1])
     
     return matching_images[:6]  # 最大6枚まで表示
 
@@ -101,24 +138,44 @@ def txt_to_html(lines, output_html_path, urlbase="", images=None):
         '<body>'
     ]
 
+    # 見出しと時間情報を収集
+    timestamps = []
     in_list = False
-    for line in lines:
+    
+    # 最初にすべての見出しの時間を収集
+    for i, line in enumerate(lines):
+        line = line.strip()
+        if not line:
+            continue
+            
+        current_time = extract_timestamp(line)
+        if current_time is not None:
+            timestamps.append((i, current_time))
+    
+    # HTMLの生成
+    for i, line in enumerate(lines):
         line = line.strip()
         if not line:
             continue
 
-        match = re.search(r"(\d+)分(\d+)秒頃", line)
+        current_time = extract_timestamp(line)
         timestamp_html = ""
         matching_image = None
         
-        if match:
-            total_seconds = int(match.group(1)) * 60 + int(match.group(2))
+        if current_time is not None:
+            # 次の見出しの時間を探す
+            next_time = None
+            current_index = next((j for j, (idx, _) in enumerate(timestamps) if idx == i), None)
+            if current_index is not None and current_index + 1 < len(timestamps):
+                next_time = timestamps[current_index + 1][1]
+            
+            total_seconds = current_time
             jump_url = f"{urlbase}{total_seconds}"
             timestamp_html = f'<p><a href="{jump_url}" target="_blank">▶ 動画リンク</a></p>'
             line = re.sub(r"\*\*(\d+分\d+秒頃)\*\*", r"\1", line)
-              # タイムスタンプに対応する画像を探す
+            # タイムスタンプに対応する画像を探す
             if images:
-                image_paths = find_matching_images(total_seconds, images)
+                image_paths = find_matching_images(total_seconds, next_time, images)
                 if image_paths:
                     matching_image = '<div class="timestamp-images">'
                     for image_info in image_paths:
