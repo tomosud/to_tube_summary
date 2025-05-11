@@ -37,3 +37,7 @@ Thumbs.db
 
 # API Keys
 api_key.txt
+
+
+#other
+*.bak
