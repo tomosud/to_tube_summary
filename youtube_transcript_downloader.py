@@ -199,13 +199,24 @@ def sanitize_filename(title):
 
     return title
 
+_ID_RE = re.compile(r'(?:v=|/)([0-9A-Za-z_-]{11})(?=[?&#/]|$)')
 
+def get_video_id(url):
+    """短縮 URL を含むあらゆる YouTube URL から動画 ID を取得（失敗時 None）"""
+    try:
+        url = requests.get(url, allow_redirects=True, timeout=5).url  # 常にリダイレクトを追跡
+    except requests.RequestException:
+        return None
+    m = _ID_RE.search(url)
+    return m.group(1) if m else None
+
+'''
 def get_video_id(url):
     """URLから動画IDを抽出"""
     pattern = r'(?:v=|\/)([0-9A-Za-z_-]{11}).*'
     match = re.search(pattern, url)
     return match.group(1) if match else None
-
+'''
 def get_youtube_title(video_id):
     """YouTubeの動画タイトルをWebページから取得"""
     try:
