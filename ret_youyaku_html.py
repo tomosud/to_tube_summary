@@ -140,21 +140,19 @@ def find_matching_images(current_time, next_time, images):
     return matching_images[:6]  # 最大6枚まで表示
 
 def txt_to_html(lines, output_html_path, urlbase: str = "", images=None):
-    """Markdown ライクなテキストを HTML に変換
+    """Markdown ライクなテキストを HTML に変換（バグフィックス版）
 
-    - 見出し / 本文 → 画像 → 動画リンク の順序を保証
-    - タイムスタンプ表記は次をすべて許容
-        * `3時間4分5秒頃`
-        * `10分5秒頃`
-        * `5秒頃`
-    - 分が省略されていれば 0 分として解釈
-    - 1 時間以上の場合、リンク表示は `H時間M分S秒頃` 形式、それ以外は `M分S秒頃` 形式
-    - 末尾に **元テキストを .txt** で保存
+    - 見出し / 本文 → 画像 → リンク の順序を保証
+    - タイムスタンプ表記は
+        * 3時間4分5秒頃
+        * 10分5秒頃
+        * 5秒頃         ← 分が省略されている場合は 0分と解釈
+    - **…** を正しく <b>…</b> に変換（\1 が残るバグ修正）
+    - 中身の無いリスト項目（例: "* **"）を無視
+    - 末尾で元テキストを .txt としても保存
     """
 
-    # ------------------------------------------------------------------
-    #  HTML テンプレート
-    # ------------------------------------------------------------------
+    # ---------------------- HTML テンプレート ---------------------- #
     html_lines = [
         "<html>",
         "<head><meta charset='utf-8'>",
@@ -174,31 +172,24 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None):
         "<body>"
     ]
 
-    # ------------------------------------------------------------------
-    #  正規表現 & ヘルパ
-    # ------------------------------------------------------------------
-    # (h)?(m)?s は必ず秒があり、分・時間はオプション
+    # ---------------------- 正規表現 ---------------------- #
     ts_pattern = re.compile(r"(?:([0-9]+)時間)?(?:([0-9]+)分)?([0-9]+)秒頃")
 
     def parse_timestamp(text: str):
-        """マッチオブジェクトから秒に変換"""
         m = ts_pattern.search(text)
         if not m:
             return None
-        h = int(m.group(1)) if m.group(1) else 0
-        mnt = int(m.group(2)) if m.group(2) else 0
+        h = int(m.group(1) or 0)
+        mnt = int(m.group(2) or 0)
         s = int(m.group(3))
         return h * 3600 + mnt * 60 + s
 
     def format_timestamp(sec: int):
-        h = sec // 3600
-        rem = sec % 3600
-        mnt = rem // 60
-        s = rem % 60
-        if h > 0:
+        h, rem = divmod(sec, 3600)
+        mnt, s = divmod(rem, 60)
+        if h:
             return f"{h}時間{mnt}分{s:02d}秒頃"
-        else:
-            return f"{mnt}分{s:02d}秒頃"
+        return f"{mnt}分{s:02d}秒頃"
 
     def build_image_block(match_list):
         buf = ["<div class='timestamp-images'>"]
@@ -214,18 +205,10 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None):
         buf.append("</div>")
         return "\n".join(buf)
 
-    # ------------------------------------------------------------------
-    #  全タイムスタンプ位置を収集
-    # ------------------------------------------------------------------
-    timestamps = []  # (index, seconds)
-    for idx, raw in enumerate(lines):
-        sec = parse_timestamp(raw)
-        if sec is not None:
-            timestamps.append((idx, sec))
+    # ---------------------- 全タイムスタンプを収集 ---------------------- #
+    timestamps = [(idx, parse_timestamp(raw)) for idx, raw in enumerate(lines) if parse_timestamp(raw) is not None]
 
-    # ------------------------------------------------------------------
-    #  セクションバッファ & ユーティリティ
-    # ------------------------------------------------------------------
+    # ---------------------- セクションバッファ ---------------------- #
     current = {"heading": "", "body": [], "images": "", "link": ""}
 
     def flush():
@@ -246,15 +229,13 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None):
 
     in_list = False
 
-    # ------------------------------------------------------------------
-    #  メインループ
-    # ------------------------------------------------------------------
+    # ---------------------- メインループ ---------------------- #
     for idx, raw in enumerate(lines):
-        line = raw.strip()
+        line = raw.rstrip()
         if not line:
             continue
 
-        # ---- 見出し ----
+        # ----- 見出し ----- #
         m_h = re.match(r'^(#{1,4})\s*(.+)$', line)
         if m_h:
             flush()
@@ -263,7 +244,6 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None):
             current["heading"] = f"<h{level}>{heading_text}</h{level}>"
             ts_sec = parse_timestamp(heading_text)
             if ts_sec is not None:
-                # 次タイムスタンプ
                 next_sec = next((sec for i2, sec in timestamps if i2 > idx), None)
                 if images:
                     imgs = find_matching_images(ts_sec, next_sec, images)
@@ -272,10 +252,9 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None):
                 current["link"] = f'<p><a href="{urlbase}{ts_sec}" target="_blank">▶ 動画：{format_timestamp(ts_sec)}</a></p>'
             continue
 
-        # ---- タイムスタンプ単独行 or 行内 ----
+        # ----- タイムスタンプ単独行 ----- #
         ts_sec_inline = parse_timestamp(line)
-        ts_only_line = bool(re.fullmatch(r"(?:(?:\d+時間)?(?:\d+分)?\d+秒頃)|(?:動画[:：]?\s*(?:\d+時間)?(?:\d+分)?\d+秒頃)", line))
-
+        ts_only_line = bool(re.fullmatch(r"(?:動画[:：]?\s*)?(?:[0-9]+時間)?(?:[0-9]+分)?[0-9]+秒頃", line))
         if ts_only_line and ts_sec_inline is not None:
             next_sec = next((sec for i2, sec in timestamps if i2 > idx), None)
             if images:
@@ -283,15 +262,20 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None):
                 if imgs:
                     current["images"] = build_image_block(imgs)
             current["link"] = f'<p><a href="{urlbase}{ts_sec_inline}" target="_blank">▶ 動画：{format_timestamp(ts_sec_inline)}</a></p>'
-            continue  # 本文は出力しない
+            continue
 
-        # ---- 本文 / リスト ----
-        if line.startswith("*"):
+        # ----- 本文 / リスト ----- #
+        if line.lstrip().startswith("*"):
+            # リスト項目
             if not in_list:
                 current["body"].append("<ul>")
                 in_list = True
-            item = re.sub(r"\*\*(.*?)\*\*", r"<b>\\1</b>", line.lstrip("*").strip())
-            current["body"].append(f"<li>{item}</li>")
+            item_raw = line.lstrip("* ")
+            # スキップ: 空 or "**" のみ
+            if re.fullmatch(r"\*\*\s*\*\*", item_raw.strip()):
+                continue
+            item_html = re.sub(r"\*\*(.*?)\*\*", r"<b>\\1</b>", item_raw)
+            current["body"].append(f"<li>{item_html}</li>")
         else:
             if in_list:
                 current["body"].append("</ul>")
@@ -306,9 +290,7 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None):
         current["body"].append("</ul>")
     flush()
 
-    # ------------------------------------------------------------------
-    #  クローズ & 原文保存
-    # ------------------------------------------------------------------
+    # ---------------------- クローズ & テキスト保存 ---------------------- #
     html_lines.append("</body></html>")
     with open(output_html_path, "w", encoding="utf-8") as fp:
         fp.write("\n".join(html_lines))
@@ -316,6 +298,7 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None):
 
     with open(output_html_path + '.txt', "w", encoding="utf-8") as fp:
         fp.write("\n".join(lines))
+
 
 def read_vtt(vtt):
     # VTTファイルを読み込む
