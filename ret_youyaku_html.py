@@ -62,7 +62,7 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None):
 
     f1text = (
     "あなたは、字幕ファイルから話された時間を正しく認識し、正確で読みやすい要約を作るスペシャリストです。"
-    "以下の内容を、日本語で、元の文章のおよそ1/5の文字数を目安に、詳しめに要約してください（ただし全体で1万字を超えないこと）。"
+    "以下の内容を、日本語で、元の文章のおよそ1/5の文字数を目安に、詳しめに要約してMarkdown形式で出力してください（ただし全体で1万字を超えないこと）。"
     "文章は敬体ではなく常体で書いてください。"
     "内容を省略しすぎず、文字数が増えても、話題の結論まで書いて。一目で構造が把握できるように、見出し（大見出し・小見出し）を付けてください。"
     "見出しだけ読んでも、内容の流れがわかるように工夫してください。適切に改行や、段落分けを行い、読みやすい文章にしてください。"
@@ -138,9 +138,10 @@ def find_matching_images(current_time, next_time, images):
         matching_images.sort(key=lambda x: x[1])
     
     return matching_images[:6]  # 最大6枚まで表示
+'''
 
 def txt_to_html(lines, output_html_path, urlbase="", images=None):
-    html_lines = [
+    html_lines = [ 
         '<html>',
         '<head><meta charset="utf-8">',        '<style>',
         'body { font-family: sans-serif; line-height: 1.7em; padding: 1em; background: #121212; color: #ffffff; }',
@@ -285,7 +286,150 @@ def txt_to_html(lines, output_html_path, urlbase="", images=None):
     with open(output_html_path, "w", encoding="utf-8") as f:
         f.write("\n".join(html_lines))
 
+    #deb
+    with open(output_html_path + '.txt', "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
     print(f"✅ HTMLが作成されました: {output_html_path}")
+'''
+
+def txt_to_html(lines, output_html_path, urlbase="", images=None):
+    """MarkdownライクなリストをHTMLへ変換する関数（改訂版）
+
+    - **表示順序** : 見出し / 本文 → 動画リンク → 画像
+    - 画像サムネイルは必ず末尾に配置し、クリックで該当タイムスタンプへジャンプ
+    - alt / title 属性にも画像の時刻を入れ、アクセシビリティを向上
+    - 行内にタイムスタンプがあっても無くても対応
+    """
+
+    # ------------------------------------------------------------------
+    # 1. HTML スタブ & CSS
+    # ------------------------------------------------------------------
+    html_lines = [
+        "<html>",
+        "<head><meta charset='utf-8'>",
+        "<style>",
+        "body{font-family:sans-serif;line-height:1.7em;padding:1em;background:#121212;color:#fff}",
+        "h1,h2,h3,h4{color:#ff9800;border-bottom:1px solid #333;padding-bottom:.3em;margin-top:1.5em}",
+        "ul{margin-left:1.5em}",
+        "li{margin-bottom:.3em}",
+        "p{margin-top:.8em}",
+        "a{color:#4fc3f7;text-decoration:none}",
+        ".timestamp-section{margin:1.5em 0}",
+        ".timestamp-images{display:grid;grid-template-columns:repeat(6,1fr);gap:16px;margin-top:.8em}",
+        ".timestamp-image{width:100%;aspect-ratio:16/9;object-fit:contain;background:#eee;border-radius:4px;box-shadow:0 2px 4px rgba(0,0,0,.1);transition:transform .3s ease,box-shadow .3s ease;cursor:pointer}",
+        ".timestamp-image:hover{transform:scale(2);z-index:10;box-shadow:0 8px 16px rgba(0,0,0,.2);border:2px solid #ff9800}",
+        "</style>",
+        "</head>",
+        "<body>"
+    ]
+
+    # ------------------------------------------------------------------
+    # 2. 全行のタイムスタンプを先に収集
+    # ------------------------------------------------------------------
+    timestamps = []  # (index, seconds)
+    for idx, raw in enumerate(lines):
+        m = re.search(r"(\d+)分(\d+)秒頃", raw)
+        if m:
+            seconds = int(m.group(1)) * 60 + int(m.group(2))
+            timestamps.append((idx, seconds))
+
+    # ------------------------------------------------------------------
+    # 3. メインループ
+    # ------------------------------------------------------------------
+    in_list = False
+    for idx, raw in enumerate(lines):
+        line = raw.strip()
+        if not line:
+            continue
+
+        # ---------- 見出し判定 ----------
+        heading_html = ""
+        m_h = re.match(r'^(#{1,4})\s*(.+)$', line)
+        if m_h:
+            level = min(len(m_h.group(1)), 4)
+            heading_html = f"<h{level}>{m_h.group(2).strip()}</h{level}>"
+            if in_list:
+                html_lines.append("</ul>")
+                in_list = False
+
+        # ---------- タイムスタンプ抽出 ----------
+        ts_match = re.search(r"(\d+)分(\d+)秒頃", line)
+        current_ts = int(ts_match.group(1))*60 + int(ts_match.group(2)) if ts_match else None
+        next_ts = None
+        if current_ts is not None:
+            for i2, sec in timestamps:
+                if i2 > idx:
+                    next_ts = sec
+                    break
+
+        # ---------- 本文 / リスト ----------
+        body_html = ""
+        if not m_h:  # 見出し行以外が対象
+            if line.startswith("*"):
+                if not in_list:
+                    html_lines.append("<ul>")
+                    in_list = True
+                item = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", line.lstrip("*").strip())
+                body_html = f"<li>{item}</li>"
+            elif line.startswith("http://") or line.startswith("https://"):
+                if in_list:
+                    html_lines.append("</ul>")
+                    in_list = False
+                body_html = f'<p><a href="{line}" target="_blank">{line}</a></p>'
+            else:
+                if in_list:
+                    html_lines.append("</ul>")
+                    in_list = False
+                body_html = f"<p>{re.sub(r'\*\*(.*?)\*\*', r'<b>\\1</b>', line)}</p>"
+
+        # ---------- 動画リンク ----------
+        link_html = ""
+        if current_ts is not None:
+            mm, ss = divmod(current_ts, 60)
+            link_html = f'<p><a href="{urlbase}{current_ts}" target="_blank">▶ 動画：{mm}分{ss:02d}秒頃</a></p>'
+
+        # ---------- 画像サムネイル ----------
+        images_html = ""
+        if current_ts is not None and images:
+            matched = find_matching_images(current_ts, next_ts, images)
+            if matched:
+                buf = ["<div class='timestamp-images'>"]
+                for path, img_start, img_end in matched:
+                    rel = os.path.relpath(path, os.path.dirname(output_html_path)).replace('\\', '/')
+                    mm_i, ss_i = divmod(int(img_start), 60)
+                    buf.append(
+                        f'<a href="{urlbase}{int(img_start)}" target="_blank">'
+                        f'<img src="{rel}" class="timestamp-image" '
+                        f'alt="Screenshot at {mm_i}:{ss_i:02d}" '
+                        f'title="クリックして{mm_i}分{ss_i:02d}秒の動画を開く"></a>'
+                    )
+                buf.append("</div>")
+                images_html = "\n".join(buf)
+
+        # ---------- セクション出力 ----------
+        if heading_html or body_html or link_html or images_html:
+            html_lines.append("<div class='timestamp-section'>")
+            if heading_html:
+                html_lines.append(heading_html)
+            if body_html:
+                html_lines.append(body_html)
+            if link_html:
+                html_lines.append(link_html)
+            if images_html:
+                html_lines.append(images_html)
+            html_lines.append("</div>")
+
+    if in_list:
+        html_lines.append("</ul>")
+
+    html_lines.append("</body></html>")
+    with open(output_html_path, "w", encoding="utf-8") as fp:
+        fp.write("\n".join(html_lines))
+    print(f"✅ HTMLが作成されました: {output_html_path}")
+
+
+
 
 def read_vtt(vtt):
     # VTTファイルを読み込む
