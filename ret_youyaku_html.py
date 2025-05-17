@@ -139,21 +139,15 @@ def find_matching_images(current_time, next_time, images):
     
     return matching_images[:6]  # 最大6枚まで表示
 
-
 def txt_to_html(lines, output_html_path, urlbase: str = "", images=None):
-    """Markdown ライクなテキストを HTML に変換
+    """Markdown ライクなテキストを HTML に変換 (リファクタリング版)
 
-    出力順序 (各セクション)
-        1. 見出し (h1-h4)
-        2. 本文 / リスト
-        3. 画像サムネイル (最大 6 枚)
-        4. 動画リンク (▶ 動画：mm分ss秒頃)
-
-    タイムスタンプだけが書かれた行 (例: "動画：0分00秒頃" / "0分00秒頃") は
-    見出し行でない限り HTML へ出力しない (リンクだけ残す)。
+    セクション単位でまとめてから出力することで、
+    **見出し → 本文 → 画像 → リンク** の順序を保証。
+    タイムスタンプ専用行は本文を出力せず、同じセクションに画像・リンクだけを追加。
     """
 
-    # --------------------------- 基本テンプレート --------------------------- #
+    # ---- HTML テンプレート & CSS ---- #
     html_lines = [
         "<html>",
         "<head><meta charset='utf-8'>",
@@ -173,36 +167,77 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None):
         "<body>"
     ]
 
-    # ---------------------- すべてのタイムスタンプを記録 ---------------------- #
-    timestamps = []  # (index, seconds)
+    # ---- 正規表現 ---- #
     ts_pattern = re.compile(r"(\d+)分(\d+)秒頃")
+
+    # ---- セクション用バッファ ---- #
+    current = {
+        "heading": "",
+        "body": [],
+        "images": "",
+        "link": ""
+    }
+
+    def flush_section():
+        """現在のセクションを html_lines に書き出す"""
+        nonlocal current
+        if not (current["heading"] or current["body"] or current["images"] or current["link"]):
+            return
+        html_lines.append("<div class='timestamp-section'>")
+        if current["heading"]:
+            html_lines.append(current["heading"])
+        if current["body"]:
+            html_lines.extend(current["body"])
+        if current["images"]:
+            html_lines.append(current["images"])
+        if current["link"]:
+            html_lines.append(current["link"])
+        html_lines.append("</div>")
+        current = {"heading": "", "body": [], "images": "", "link": ""}
+
+    # ---- ユーティリティ ---- #
+    def build_image_block(match_list):
+        buf = ["<div class='timestamp-images'>"]
+        for path, img_start, _ in match_list:
+            rel = os.path.relpath(path, os.path.dirname(output_html_path)).replace('\\', '/')
+            mm_i, ss_i = divmod(int(img_start), 60)
+            buf.append(
+                f'<a href="{urlbase}{int(img_start)}" target="_blank">'
+                f'<img src="{rel}" class="timestamp-image" '
+                f'alt="Screenshot at {mm_i}:{ss_i:02d}" '
+                f'title="クリックして{mm_i}分{ss_i:02d}秒の動画を開く"></a>'
+            )
+        buf.append("</div>")
+        return "\n".join(buf)
+
+    # ---- すべてのタイムスタンプを先に格納 ---- #
+    timestamps = []  # (index, seconds)
     for i, raw in enumerate(lines):
         m = ts_pattern.search(raw)
         if m:
-            seconds = int(m.group(1)) * 60 + int(m.group(2))
+            seconds = int(m.group(1))*60 + int(m.group(2))
             timestamps.append((i, seconds))
 
-    # ------------------------------- ループ ------------------------------- #
+    # ---- メインループ ---- #
     in_list = False
     for idx, raw in enumerate(lines):
         line = raw.strip()
         if not line:
             continue
 
-        # ---- 見出しか判定 ---- #
-        heading_html = ""
+        # 見出しかどうか
         m_h = re.match(r'^(#{1,4})\s*(.+)$', line)
         if m_h:
+            # 次のセクションが始まるので flush
+            flush_section()
             level = min(len(m_h.group(1)), 4)
-            heading_html = f"<h{level}>{m_h.group(2).strip()}</h{level}>"
-            if in_list:
-                html_lines.append("</ul>")
-                in_list = False
+            current["heading"] = f"<h{level}>{m_h.group(2).strip()}</h{level}>"
+            continue  # 次の行へ
 
-        # ---- タイムスタンプ抽出 ---- #
+        # タイムスタンプ検出
         ts_match = ts_pattern.search(line)
         current_ts = int(ts_match.group(1))*60 + int(ts_match.group(2)) if ts_match else None
-        # 次タイムスタンプ (画像範囲用)
+        # 次見出しまでの最初のTS を画像検索範囲の end とする
         next_ts = None
         if current_ts is not None:
             for i2, sec in timestamps:
@@ -210,76 +245,48 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None):
                     next_ts = sec
                     break
 
-        # ---- 本文 / リスト生成 ---- #
-        body_html = ""
-        if not m_h:  # 見出し行でない
-            is_ts_only_line = bool(re.fullmatch(r"動画[:：]?\s*\d+分\d+秒頃", line) or re.fullmatch(r"\d+分\d+秒頃", line))
-            if is_ts_only_line:
-                # 本文行をスキップ (後でリンクだけ出す)
-                body_html = ""
+        # タイムスタンプ単独行か？
+        ts_only = bool(re.fullmatch(r"動画[:：]?\s*\d+分\d+秒頃", line) or re.fullmatch(r"\d+分\d+秒頃", line))
+
+        if ts_only:
+            # 本文は追加しない。画像 & リンクだけ追加して終わり。
+            if images and current_ts is not None:
+                imgs = find_matching_images(current_ts, next_ts, images)
+                if imgs:
+                    current["images"] = build_image_block(imgs)
+            if current_ts is not None:
+                mm, ss = divmod(current_ts, 60)
+                current["link"] = f'<p><a href="{urlbase}{current_ts}" target="_blank">▶ 動画：{mm}分{ss:02d}秒頃</a></p>'
+            continue
+
+        # ---- 本文 or リスト ---- #
+        if line.startswith("*"):
+            if not in_list:
+                current["body"].append("<ul>")
+                in_list = True
+            item = re.sub(r"\*\*(.*?)\*\*", r"<b>\\1</b>", line.lstrip("*").strip())
+            current["body"].append(f"<li>{item}</li>")
+        else:
+            if in_list:
+                current["body"].append("</ul>")
+                in_list = False
+            if line.startswith("http://") or line.startswith("https://"):
+                current["body"].append(f'<p><a href="{line}" target="_blank">{line}</a></p>')
             else:
-                if line.startswith("*"):
-                    if not in_list:
-                        html_lines.append("<ul>")
-                        in_list = True
-                    item_txt = re.sub(r"\*\*(.*?)\*\*", r"<b>\\1</b>", line.lstrip("*").strip())
-                    body_html = f"<li>{item_txt}</li>"
-                elif line.startswith("http://") or line.startswith("https://"):
-                    if in_list:
-                        html_lines.append("</ul>")
-                        in_list = False
-                    body_html = f'<p><a href="{line}" target="_blank">{line}</a></p>'
-                else:
-                    if in_list:
-                        html_lines.append("</ul>")
-                        in_list = False
-                    replaced = re.sub(r"\*\*(.*?)\*\*", r"<b>\\1</b>", line)
-                    body_html = f"<p>{replaced}</p>"
+                replaced = re.sub(r"\*\*(.*?)\*\*", r"<b>\\1</b>", line)
+                current["body"].append(f"<p>{replaced}</p>")
 
-        # ---- 画像サムネイル ---- #
-        images_html = ""
-        if current_ts is not None and images:
-            matched = find_matching_images(current_ts, next_ts, images)
-            if matched:
-                buf = ["<div class='timestamp-images'>"]
-                for path, img_start, _ in matched:
-                    rel = os.path.relpath(path, os.path.dirname(output_html_path)).replace('\\', '/')
-                    mm_i, ss_i = divmod(int(img_start), 60)
-                    buf.append(
-                        f'<a href="{urlbase}{int(img_start)}" target="_blank">'
-                        f'<img src="{rel}" class="timestamp-image" '
-                        f'alt="Screenshot at {mm_i}:{ss_i:02d}" '
-                        f'title="クリックして{mm_i}分{ss_i:02d}秒の動画を開く"></a>'
-                    )
-                buf.append("</div>")
-                images_html = "\n".join(buf)
-
-        # ---- 動画リンク ---- #
-        link_html = ""
-        if current_ts is not None:
-            mm, ss = divmod(current_ts, 60)
-            link_html = f'<p><a href="{urlbase}{current_ts}" target="_blank">▶ 動画：{mm}分{ss:02d}秒頃</a></p>'
-
-        # ---- 出力順序: 見出し → 本文 → 画像 → リンク ---- #
-        if heading_html or body_html or images_html or link_html:
-            html_lines.append("<div class='timestamp-section'>")
-            if heading_html:
-                html_lines.append(heading_html)
-            if body_html:
-                html_lines.append(body_html)
-            if images_html:
-                html_lines.append(images_html)
-            if link_html:
-                html_lines.append(link_html)
-            html_lines.append("</div>")
-
+    # ループ終了時 flush
     if in_list:
-        html_lines.append("</ul>")
+        current["body"].append("</ul>")
+        in_list = False
+    flush_section()
 
+    # クローズ
     html_lines.append("</body></html>")
     with open(output_html_path, "w", encoding="utf-8") as f:
         f.write("\n".join(html_lines))
-    print(f"✅ HTML が作成されました: {output_html_path}")
+    print(f"✅ HTML 作成: {output_html_path}")
 
 
 def read_vtt(vtt):
