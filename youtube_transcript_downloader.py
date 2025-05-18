@@ -475,7 +475,32 @@ if __name__ == "__main__":
                     print(f"\n同じURL({url})でリトライします...")
                     continue
                 else:
-                    print("\nリトライ回数上限に達しました。処理を終了します。")
+                    print("\nリトライ回数上限に達しました。")
+                    while True:
+                        retry = input("Enterキーを押してリトライ (最大3回)、他のキーを押して終了...")
+                        if retry.strip() == "":
+                            # リトライ処理を3回まで行う
+                            max_retries_after_limit = 3
+                            for j in range(max_retries_after_limit):
+                                if process_video(url):
+                                    # 処理成功
+                                    break  # 内側のループを抜ける
+                                else:
+                                    # 処理失敗
+                                    print(f"\nリトライします... ({j+1}/{max_retries_after_limit})")
+                                    if j < max_retries_after_limit - 1:
+                                        import time
+                                        time.sleep(2)
+                                        print(f"\n同じURL({url})でリトライします...")
+                                        continue  # 内側のループの次のイテレーションへ
+                                    else:
+                                        print("\nリトライ回数上限に達しました。処理を終了します。")
+                                        break  # 内側のループを抜ける
+                            else:
+                                break  # 内側のループが成功した場合、外側のループを抜ける
+                            break  # 内側のループを抜ける
+                        else:
+                            break  # 外側のループを抜ける
                     break
     except Exception as e:
         print(f"予期せぬエラー: {str(e)}")
