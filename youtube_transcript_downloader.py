@@ -461,7 +461,7 @@ if __name__ == "__main__":
                 url = input("YouTube動画のURLを入力してください: ").strip()
         
         # 動画処理を実行
-        max_retries = 3
+        max_retries = 8
         for i in range(max_retries):
             if process_video(url):
                 # 処理成功
