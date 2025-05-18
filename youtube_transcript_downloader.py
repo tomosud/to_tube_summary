@@ -461,19 +461,22 @@ if __name__ == "__main__":
                 url = input("YouTube動画のURLを入力してください: ").strip()
         
         # 動画処理を実行
-        while True:
+        max_retries = 3
+        for i in range(max_retries):
             if process_video(url):
                 # 処理成功
                 break
             else:
-                # 処理失敗 - リトライするか確認
-                retry = input("\nEnterキーを押してリトライ、他のキーを押して終了...")
-                if retry.strip() == "":
+                # 処理失敗
+                print(f"\nリトライします... ({i+1}/{max_retries})")
+                if i < max_retries - 1:
+                    import time
+                    time.sleep(2)
                     print(f"\n同じURL({url})でリトライします...")
                     continue
                 else:
+                    print("\nリトライ回数上限に達しました。処理を終了します。")
                     break
-                    
     except Exception as e:
         print(f"予期せぬエラー: {str(e)}")
         input("Enterキーを押して終了...")
