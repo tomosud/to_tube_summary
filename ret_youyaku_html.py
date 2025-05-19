@@ -41,6 +41,59 @@ model = genai.GenerativeModel('gemini-2.0-flash')
 # グローバル変数
 url_base = ""
 
+def get_vtt_duration_in_seconds(vtt_lines):
+    last_time = None
+    timecode_pattern = re.compile(r'(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s-->\s(\d{2}):(\d{2}):(\d{2})\.(\d{3})')
+
+    for line in vtt_lines:
+        match = timecode_pattern.match(line.strip())
+        if match:
+            # 終了時刻を抽出
+            h, m, s, ms = map(int, match.groups()[4:])
+            last_time = h * 3600 + m * 60 + s + ms / 1000.0
+
+    if last_time is not None:
+        return int(last_time)  # 整数に変換（小数点以下は切り捨て）
+    else:
+        return 0  # タイムコードが見つからない場合
+    
+#見出しの時間が良い分散になっているかを確認する関数
+def judge_good_time_split(text_lines,vtt_lines):
+    # ---------------------- 正規表現 ---------------------- #
+    ts_pattern = re.compile(r"(?:([0-9]+)時間)?(?:([0-9]+)分)?([0-9]+)秒頃")
+
+    def parse_timestamp(text):
+        m = ts_pattern.search(text)
+        if not m:
+            return None
+        h = int(m.group(1) or 0)
+        mnt = int(m.group(2) or 0)
+        s = int(m.group(3))
+        return h * 3600 + mnt * 60 + s
+    
+    all_time = []
+    for line in text_lines:
+        # 時間情報を抽出
+        match = re.search(r"(\d+)分(\d+)秒頃", line)
+        if match:
+            all_time.append(parse_timestamp(line))
+            #print(all_time[-1],line)
+
+    vttsec = get_vtt_duration_in_seconds(vtt_lines)
+
+    per = float(all_time[-1]) / float(vttsec)
+
+    #print(per,'vttsec:',vttsec,all_time[-1])
+    #print (all_time)
+
+    if len(all_time) != len(list(set(all_time))):
+        print('時間が重複している行があります。')
+        return False
+    if per < 0.5:
+        print('時間の分散が不均一です。')
+        return False
+    
+    return True
 
 def yoyaku_gemini(vtt, title, output_html_path, images=None):
     """字幕ファイルを要約してHTMLを生成する"""
@@ -75,10 +128,17 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None):
     #f1text = ("あなたは字幕ファイルから、それがどの時間に話されたかを正しく認識しながら正確で読み易い要約文を作るスペシャリストです。以下を、日本語で5000文字程度で長めに詳しく要約して。ただし、絶対に１万字を超えないこと。英語の人名、固有名詞などはそのまま使って。大小の見出しを付けて一見してわかりやすく。" + add + "絶対に内容を省略しすぎないで。敬体ではない文章が良い。この指示への返事は不要なので、内容だけ返して。最後には「以上」と書いて。\n\n" + '\n'.join(result_merged_txt))
 
 
-    chat = model.start_chat()
+    chat = model.start_chat()  # 初回のみセッション開始
 
-    # 最初の質問
-    responseA = chat.send_message(f1text)
+    while True:
+        responseA = chat.send_message(f1text)
+
+        #見出しの時間が良い分散になっているかを確認
+        if judge_good_time_split(responseA.text.split('\n'), result_merged_txt):
+            break  # 成功したらループ終了
+        else:
+            chat = model.start_chat()  # 不適切なら新しくセッションを作り直す
+            print('分散が悪いので、再度要約を実行します。')
 
     # 回答を踏まえた次の質問
     responseB = chat.send_message("では、その内容の興味深いポイントをまとめて。200文字程度で日本語で。「動画のポイント」という見出しを付けて。この講演に興味を持つ人が特記したいような内容を。全般的でなくとも、特徴的な点を。またこっちは文末に「以上」は不要。")
