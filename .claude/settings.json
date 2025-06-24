@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(*)",
+      "Write(*)"
+    ]
+  },
+  "codeExecution": "always",
+  "bashApproval": "always",
+  "fileOperations": "always"
+}

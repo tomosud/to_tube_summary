@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import google.generativeai as genai
 import tkinter as tk
 from tkinter import simpledialog
@@ -95,58 +96,219 @@ def judge_good_time_split(text_lines,vtt_lines):
     
     return True
 
+def validate_json_time_distribution(json_data, vtt_lines):
+    """JSONデータの時間分散をチェックする"""
+    try:
+        sections = json_data.get('sections', [])
+        if len(sections) < 2:
+            return False
+            
+        # 動画の総時間を取得
+        total_seconds = get_vtt_duration_in_seconds(vtt_lines)
+        if total_seconds == 0:
+            return False
+            
+        # セクションの時間を取得
+        timestamps = [section.get('timestamp_seconds', 0) for section in sections]
+        
+        # 重複チェック
+        if len(timestamps) != len(set(timestamps)):
+            print('時間が重複しているセクションがあります。')
+            return False
+            
+        # 最後のタイムスタンプが動画の50%以上かチェック
+        if len(timestamps) > 0:
+            last_timestamp = max(timestamps)
+            coverage_ratio = float(last_timestamp) / float(total_seconds)
+            if coverage_ratio < 0.5:
+                print(f'時間の分散が不均一です。カバー率: {coverage_ratio:.2f}')
+                return False
+                
+        return True
+        
+    except Exception as e:
+        print(f'時間分散チェックエラー: {str(e)}')
+        return False
+
+def json_to_html(json_data, output_html_path, urlbase: str = "", images=None):
+    """JSONデータをHTMLに変換"""
+    
+    # HTMLテンプレート
+    html_lines = [
+        "<html>",
+        "<head><meta charset='utf-8'>",
+        "<style>",
+        "body{font-family:sans-serif;line-height:1.7em;padding:1em;background:#121212;color:#fff}",
+        "h1,h2,h3,h4{color:#ff9800;border-bottom:1px solid #333;padding-bottom:.3em;margin-top:1.5em}",
+        "ul{margin-left:1.5em}",
+        "li{margin-bottom:.3em}",
+        "p{margin-top:.8em}",
+        "a{color:#4fc3f7;text-decoration:none}",
+        ".timestamp-section{margin:1.5em 0}",
+        ".timestamp-images{display:grid;grid-template-columns:repeat(6,1fr);gap:16px;margin-top:.8em}",
+        ".timestamp-image{width:100%;aspect-ratio:16/9;object-fit:contain;background:#eee;border-radius:4px;box-shadow:0 2px 4px rgba(0,0,0,.1);transition:transform .3s ease,box-shadow .3s ease;cursor:pointer}",
+        ".timestamp-image:hover{transform:scale(2);z-index:10;box-shadow:0 8px 16px rgba(0,0,0,.2);border:2px solid #ff9800}",
+        "</style>",
+        "</head>",
+        "<body>"
+    ]
+    
+    # タイトルと要約を追加
+    title = json_data.get('title', '動画要約')
+    summary = json_data.get('summary', '')
+    
+    html_lines.append(f"<h1>{title}</h1>")
+    if summary:
+        html_lines.append(f"<h2>動画のポイント</h2>")
+        html_lines.append(f"<p>{summary}</p>")
+    
+    # セクションを処理
+    sections = json_data.get('sections', [])
+    
+    def format_timestamp_from_seconds(seconds):
+        """秒数から時間文字列に変換"""
+        h, rem = divmod(seconds, 3600)
+        m, s = divmod(rem, 60)
+        if h:
+            return f"{h}時間{m}分{s:02d}秒頃"
+        return f"{m}分{s:02d}秒頃"
+    
+    def build_image_block(match_list):
+        """画像ブロックを構築"""
+        buf = ["<div class='timestamp-images'>"]
+        for path, img_start, _ in match_list:
+            rel = os.path.relpath(path, os.path.dirname(output_html_path)).replace('\\', '/')
+            mm_i, ss_i = divmod(int(img_start), 60)
+            buf.append(
+                f'<a href="{urlbase}{int(img_start)}" target="_blank">'
+                f'<img src="{rel}" class="timestamp-image" '
+                f'alt="Screenshot at {mm_i}:{ss_i:02d}" '
+                f'title="クリックして{mm_i}分{ss_i:02d}秒の動画を開く"></a>'
+            )
+        buf.append("</div>")
+        return "\n".join(buf)
+    
+    # セクションをタイムスタンプでソート
+    sections.sort(key=lambda x: x.get('timestamp_seconds', 0))
+    
+    for i, section in enumerate(sections):
+        timestamp_seconds = section.get('timestamp_seconds', 0)
+        heading = section.get('heading', '見出し')
+        content = section.get('content', '')
+        
+        html_lines.append("<div class='timestamp-section'>")
+        html_lines.append(f"<h3>{heading}</h3>")
+        html_lines.append(f"<p>{content}</p>")
+        
+        # 画像を追加
+        if images:
+            next_timestamp = sections[i + 1].get('timestamp_seconds') if i + 1 < len(sections) else None
+            imgs = find_matching_images(timestamp_seconds, next_timestamp, images)
+            if imgs:
+                html_lines.append(build_image_block(imgs))
+        
+        # 動画リンクを追加
+        time_str = format_timestamp_from_seconds(timestamp_seconds)
+        html_lines.append(f'<p><a href="{urlbase}{timestamp_seconds}" target="_blank">▶ 動画：{time_str}</a></p>')
+        html_lines.append("</div>")
+    
+    # HTMLを閉じる
+    html_lines.append("</body></html>")
+    
+    # ファイルに保存
+    with open(output_html_path, "w", encoding="utf-8") as fp:
+        fp.write("\n".join(html_lines))
+    print(f"✅ HTML 作成: {output_html_path}")
+    
+    # JSONデータもテキストファイルとして保存
+    with open(output_html_path + '.txt', "w", encoding="utf-8") as fp:
+        fp.write(json.dumps(json_data, ensure_ascii=False, indent=2))
+
+def get_response_schema():
+    """Structured OutputsのJSONスキーマを返す"""
+    return {
+        'type': 'OBJECT',
+        'required': ['title', 'summary', 'sections'],
+        'properties': {
+            'title': {'type': 'STRING'},
+            'summary': {'type': 'STRING'},
+            'sections': {
+                'type': 'ARRAY',
+                'items': {
+                    'type': 'OBJECT',
+                    'required': ['heading', 'timestamp_seconds', 'content'],
+                    'properties': {
+                        'heading': {'type': 'STRING'},
+                        'timestamp_seconds': {'type': 'INTEGER'},
+                        'content': {
+                            'type': 'STRING'
+                        }
+                    }
+                }
+            }
+        }
+    }
+
 def yoyaku_gemini(vtt, title, output_html_path, images=None):
-    """字幕ファイルを要約してHTMLを生成する"""
+    """字幕ファイルを要約してHTMLを生成する（Structured Outputs版）"""
     result_merged_txt = read_vtt(vtt)
 
-    print('要約中')
+    print('要約中（Structured Outputs使用）')
 
-    #------要約分をgeminiで作ってDL
-    #add = 'これはvttの字幕ファイルなので、タイムコードの時間を参考に、各見出しの次の行に大体何分何秒の時点で話された話題かを「動画：*分*秒頃」と書いて。例として00:16:27.182は0時間:16分:27秒.182msです。これは正しくないと困るので慎重に読み取って構築を。'
+    # Structured Outputs用のプロンプト
+    prompt = f"""あなたは、字幕ファイルから話された時間を正しく認識し、正確で読みやすい要約を作るスペシャリストです。
 
-    add = (
-    "これは.vtt形式の字幕ファイルです。各見出しの次の行に、"
-    "その話題が話されたおおよそのタイムスタンプを「動画：*分*秒頃」という形式で記載してください。"
-    "例えば、00:16:27.182 は「動画：16分27秒頃」となります。"
-    "時間の読み取りミスは重大なので、正確に処理してください。"
-    )
+以下のvtt形式の字幕ファイルを分析し、JSON形式で要約を作成してください。
 
-    add += f'タイトルは「{title}」を日本語に訳して使用してください。\n'
+要件：
+1. titleは「{title}」を日本語に訳して使用
+2. summaryは動画の興味深いポイントを200文字程度で記述
+3. sectionsは各セクションの情報を含む配列
+   - heading: 見出し（内容の流れがわかるように）
+   - timestamp_seconds: その話題が話された時刻（秒数）
+   - content: 最大150文字程度の本文（常体で記述）
 
-    f1text = (
-    "あなたは、字幕ファイルから話された時間を正しく認識し、正確で読みやすい要約を作るスペシャリストです。"
-    "以下の内容を、日本語で、元の文章のおよそ1/5の文字数を目安に、詳しめに要約してMarkdown形式で出力してください（ただし全体で1万字を超えないこと）。"
-    "文章は敬体ではなく常体で書いてください。"
-    "内容を省略しすぎず、文字数が増えても、話題の結論まで書いて。一目で構造が把握できるように、見出し（大見出し・小見出し）を付けてください。"
-    "見出しだけ読んでも、内容の流れがわかるように工夫してください。適切に改行や、段落分けを行い、読みやすい文章にしてください。"
-    f"{add}"
-    "英語の人名や固有名詞は原文通りに保ってください。"
-    "この指示への返答は不要です。出力は内容のみを表示し、最後に「以上」と記載してください。\n\n"
-    )
+注意点：
+- 英語の人名や固有名詞は原文通りに保つ
+- 時間の読み取りは正確に行う
+- 内容を省略しすぎず、話題の結論まで含める
+- 各セクションの時間は適切に分散させる
 
-    f1text += '\n'.join(result_merged_txt)
-    #f1text = ("あなたは字幕ファイルから、それがどの時間に話されたかを正しく認識しながら正確で読み易い要約文を作るスペシャリストです。以下を、日本語で5000文字程度で長めに詳しく要約して。ただし、絶対に１万字を超えないこと。英語の人名、固有名詞などはそのまま使って。大小の見出しを付けて一見してわかりやすく。" + add + "絶対に内容を省略しすぎないで。敬体ではない文章が良い。この指示への返事は不要なので、内容だけ返して。最後には「以上」と書いて。\n\n" + '\n'.join(result_merged_txt))
+字幕データ：
+{chr(10).join(result_merged_txt)}"""
 
-
-    chat = model.start_chat()  # 初回のみセッション開始
-
-    while True:
-        responseA = chat.send_message(f1text)
-
-        #見出しの時間が良い分散になっているかを確認
-        if judge_good_time_split(responseA.text.split('\n'), result_merged_txt):
-            break  # 成功したらループ終了
-        else:
-            chat = model.start_chat()  # 不適切なら新しくセッションを作り直す
-            print('分散が悪いので、再度要約を実行します。')
-
-    # 回答を踏まえた次の質問
-    responseB = chat.send_message("では、その内容の興味深いポイントをまとめて。200文字程度で日本語で。「動画のポイント」という見出しを付けて。この講演に興味を持つ人が特記したいような内容を。全般的でなくとも、特徴的な点を。またこっちは文末に「以上」は不要。")
-
-    result = responseB.text.split('\n') + ['\n'] + [url_base] + responseA.text.split('\n')
+    chat = model.start_chat()
+    max_retries = 8
     
-    # HTMLファイルを生成
-    txt_to_html(result, output_html_path, url_base, images)
+    for attempt in range(max_retries):
+        try:
+            response = chat.send_message(
+                prompt,
+                generation_config={
+                    'response_mime_type': 'application/json',
+                    'response_schema': get_response_schema()
+                }
+            )
+            
+            # JSONレスポンスをパース
+            json_data = json.loads(response.text)
+            
+            # 時間分散チェック
+            if validate_json_time_distribution(json_data, result_merged_txt):
+                break
+            else:
+                print(f'時間分散が不適切です。リトライ {attempt + 1}/{max_retries}')
+                chat = model.start_chat()
+                
+        except Exception as e:
+            print(f'JSON解析エラー: {str(e)}. リトライ {attempt + 1}/{max_retries}')
+            chat = model.start_chat()
+            
+        if attempt == max_retries - 1:
+            raise Exception("Structured Outputs処理が最大リトライ回数に達しました")
+    
+    # JSONデータからHTMLを生成
+    json_to_html(json_data, output_html_path, url_base, images)
 
 def extract_timestamp(line):
     """行から時間情報を抽出する"""
