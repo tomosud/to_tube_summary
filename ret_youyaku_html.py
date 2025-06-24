@@ -130,11 +130,32 @@ def validate_json_time_distribution(json_data, vtt_lines):
         print(f'時間分散チェックエラー: {str(e)}')
         return False
 
-def json_to_html(json_data, output_html_path, urlbase: str = "", images=None):
-    """JSONデータをHTMLに変換"""
-    
-    # HTMLテンプレート
-    html_lines = [
+def format_timestamp_from_seconds(seconds):
+    """秒数から時間文字列に変換"""
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}時間{m}分{s:02d}秒頃" if h else f"{m}分{s:02d}秒頃"
+
+def build_image_block(match_list, urlbase, output_html_path):
+    """画像ブロックを構築"""
+    if not match_list:
+        return ""
+    buf = ["<div class='timestamp-images'>"]
+    for path, img_start, _ in match_list:
+        rel = os.path.relpath(path, os.path.dirname(output_html_path)).replace('\\', '/')
+        mm_i, ss_i = divmod(int(img_start), 60)
+        buf.append(
+            f'<a href="{urlbase}{int(img_start)}" target="_blank">'
+            f'<img src="{rel}" class="timestamp-image" '
+            f'alt="Screenshot at {mm_i}:{ss_i:02d}" '
+            f'title="クリックして{mm_i}分{ss_i:02d}秒の動画を開く"></a>'
+        )
+    buf.append("</div>")
+    return "\n".join(buf)
+
+def get_html_template():
+    """HTMLテンプレートを返す"""
+    return [
         "<html>",
         "<head><meta charset='utf-8'>",
         "<style>",
@@ -152,6 +173,10 @@ def json_to_html(json_data, output_html_path, urlbase: str = "", images=None):
         "</head>",
         "<body>"
     ]
+
+def json_to_html(json_data, output_html_path, urlbase: str = "", images=None):
+    """JSONデータをHTMLに変換"""
+    html_lines = get_html_template()
     
     # タイトルと要約を追加
     title = json_data.get('title', '動画要約')
@@ -159,60 +184,36 @@ def json_to_html(json_data, output_html_path, urlbase: str = "", images=None):
     
     html_lines.append(f"<h1>{title}</h1>")
     if summary:
-        html_lines.append(f"<h2>動画のポイント</h2>")
-        html_lines.append(f"<p>{summary}</p>")
+        html_lines.extend([f"<h2>動画のポイント</h2>", f"<p>{summary}</p>"])
     
     # セクションを処理
-    sections = json_data.get('sections', [])
-    
-    def format_timestamp_from_seconds(seconds):
-        """秒数から時間文字列に変換"""
-        h, rem = divmod(seconds, 3600)
-        m, s = divmod(rem, 60)
-        if h:
-            return f"{h}時間{m}分{s:02d}秒頃"
-        return f"{m}分{s:02d}秒頃"
-    
-    def build_image_block(match_list):
-        """画像ブロックを構築"""
-        buf = ["<div class='timestamp-images'>"]
-        for path, img_start, _ in match_list:
-            rel = os.path.relpath(path, os.path.dirname(output_html_path)).replace('\\', '/')
-            mm_i, ss_i = divmod(int(img_start), 60)
-            buf.append(
-                f'<a href="{urlbase}{int(img_start)}" target="_blank">'
-                f'<img src="{rel}" class="timestamp-image" '
-                f'alt="Screenshot at {mm_i}:{ss_i:02d}" '
-                f'title="クリックして{mm_i}分{ss_i:02d}秒の動画を開く"></a>'
-            )
-        buf.append("</div>")
-        return "\n".join(buf)
-    
-    # セクションをタイムスタンプでソート
-    sections.sort(key=lambda x: x.get('timestamp_seconds', 0))
+    sections = sorted(json_data.get('sections', []), key=lambda x: x.get('timestamp_seconds', 0))
     
     for i, section in enumerate(sections):
         timestamp_seconds = section.get('timestamp_seconds', 0)
         heading = section.get('heading', '見出し')
         content = section.get('content', '')
         
-        html_lines.append("<div class='timestamp-section'>")
-        html_lines.append(f"<h3>{heading}</h3>")
-        html_lines.append(f"<p>{content}</p>")
+        html_lines.extend([
+            "<div class='timestamp-section'>",
+            f"<h3>{heading}</h3>",
+            f"<p>{content}</p>"
+        ])
         
         # 画像を追加
         if images:
             next_timestamp = sections[i + 1].get('timestamp_seconds') if i + 1 < len(sections) else None
             imgs = find_matching_images(timestamp_seconds, next_timestamp, images)
             if imgs:
-                html_lines.append(build_image_block(imgs))
+                html_lines.append(build_image_block(imgs, urlbase, output_html_path))
         
         # 動画リンクを追加
         time_str = format_timestamp_from_seconds(timestamp_seconds)
-        html_lines.append(f'<p><a href="{urlbase}{timestamp_seconds}" target="_blank">▶ 動画：{time_str}</a></p>')
-        html_lines.append("</div>")
+        html_lines.extend([
+            f'<p><a href="{urlbase}{timestamp_seconds}" target="_blank">▶ 動画：{time_str}</a></p>',
+            "</div>"
+        ])
     
-    # HTMLを閉じる
     html_lines.append("</body></html>")
     
     # ファイルに保存
@@ -241,7 +242,8 @@ def get_response_schema():
                         'heading': {'type': 'STRING'},
                         'timestamp_seconds': {'type': 'INTEGER'},
                         'content': {
-                            'type': 'STRING'
+                            'type': 'STRING',
+                            'description': '150文字程度の詳細で、結論を省略しない本文（常体で記述、具体的な数値や固有名詞を含む）'
                         }
                     }
                 }
@@ -255,24 +257,25 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None):
 
     print('要約中（Structured Outputs使用）')
 
-    # Structured Outputs用のプロンプト
-    prompt = f"""あなたは、字幕ファイルから話された時間を正しく認識し、正確で読みやすい要約を作るスペシャリストです。
+    # Structured Outputs用のプロンプト  
+    prompt = f"""あなたは、字幕ファイルから話された時間を正しく認識し、最後まで欠けのない、正確で読みやすい要約を作るスペシャリストです。
 
 以下のvtt形式の字幕ファイルを分析し、JSON形式で要約を作成してください。
 
 要件：
 1. titleは「{title}」を日本語に訳して使用
-2. summaryは動画の興味深いポイントを200文字程度で記述
+2. summaryは動画の興味深いポイントを記述
 3. sectionsは各セクションの情報を含む配列
-   - heading: 見出し（内容の流れがわかるように）
+   - heading: 一目で内容が分かる短すぎない見出し
    - timestamp_seconds: その話題が話された時刻（秒数）
-   - content: 最大150文字程度の本文（常体で記述）
+   - content: 200文字程度の詳細で、結論を省略しない本文（常体で記述、具体的な数値や固有名詞を含む）
 
 注意点：
 - 英語の人名や固有名詞は原文通りに保つ
 - 時間の読み取りは正確に行う
-- 内容を省略しすぎず、話題の結論まで含める
+- contentは詳細に記述し、具体例や数値も含める
 - 各セクションの時間は適切に分散させる
+- 内容を省略しすぎず、話題の結論や重要なポイントまで含める
 
 字幕データ：
 {chr(10).join(result_merged_txt)}"""
