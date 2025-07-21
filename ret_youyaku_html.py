@@ -405,6 +405,9 @@ def do(vtt_path, video_title, output_dir, url=None, images=None):
     global url_base
     if url:
         url_base = url
+
+    #no cokkieのため、URLを変換
+    url_base = url_base.replace('www.youtube.com/', 'www.yout-ube.com/')
     
     yoyaku_gemini(vtt, title, html_path, images)
     return html_path
