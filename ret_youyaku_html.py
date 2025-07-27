@@ -30,16 +30,17 @@ def get_api_key():
     else:
         raise ValueError("APIキーが設定されていません。")
 
+def configure_gemini(model_name='gemini-2.0-flash'):
+    """Geminiモデルを設定する"""
+    return genai.GenerativeModel(model_name)
+
 # APIキーを設定
 apikey = get_api_key()
 print('---apikey set!')
 
 genai.configure(api_key=apikey)
 
-model = genai.GenerativeModel('gemini-2.0-flash')
-
-
-#model = genai.GenerativeModel('gemini-2.5-flash')
+model = configure_gemini('gemini-2.0-flash')
 
 
 
@@ -100,14 +101,11 @@ def judge_good_time_split(text_lines,vtt_lines):
     
     return True
 
-def yoyaku_gemini(vtt, title, output_html_path, images=None):
+def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None):
     """字幕ファイルを要約してHTMLを生成する"""
     result_merged_txt = read_vtt(vtt)
 
     print('要約中')
-
-    #------要約分をgeminiで作ってDL
-    #add = 'これはvttの字幕ファイルなので、タイムコードの時間を参考に、各見出しの次の行に大体何分何秒の時点で話された話題かを「動画：*分*秒頃」と書いて。例として00:16:27.182は0時間:16分:27秒.182msです。これは正しくないと困るので慎重に読み取って構築を。'
 
     add = (
     "これは.vtt形式の字幕ファイルです。各見出しの次の行に、"
@@ -130,8 +128,6 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None):
     )
 
     f1text += '\n'.join(result_merged_txt)
-    #f1text = ("あなたは字幕ファイルから、それがどの時間に話されたかを正しく認識しながら正確で読み易い要約文を作るスペシャリストです。以下を、日本語で5000文字程度で長めに詳しく要約して。ただし、絶対に１万字を超えないこと。英語の人名、固有名詞などはそのまま使って。大小の見出しを付けて一見してわかりやすく。" + add + "絶対に内容を省略しすぎないで。敬体ではない文章が良い。この指示への返事は不要なので、内容だけ返して。最後には「以上」と書いて。\n\n" + '\n'.join(result_merged_txt))
-
 
     chat = model.start_chat()  # 初回のみセッション開始
 
@@ -151,7 +147,7 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None):
     result = responseB.text.split('\n') + ['\n'] + [url_base] + responseA.text.split('\n')
     
     # HTMLファイルを生成
-    txt_to_html(result, output_html_path, url_base, images)
+    txt_to_html(result, output_html_path, url_base, images, detail_text)
 
 def extract_timestamp(line):
     """行から時間情報を抽出する"""
@@ -204,21 +200,9 @@ def find_matching_images(current_time, next_time, images):
     
     return matching_images[:6]  # 最大6枚まで表示
 
-def txt_to_html(lines, output_html_path, urlbase: str = "", images=None):
-    """Markdown ライクなテキストを HTML に変換（バグフィックス版）
-
-    - 見出し / 本文 → 画像 → リンク の順序を保証
-    - タイムスタンプ表記は
-        * 3時間4分5秒頃
-        * 10分5秒頃
-        * 5秒頃         ← 分が省略されている場合は 0分と解釈
-    - **…** を正しく <b>…</b> に変換（\1 が残るバグ修正）
-    - 中身の無いリスト項目（例: "* **"）を無視
-    - 末尾で元テキストを .txt としても保存
-    """
-
-    # ---------------------- HTML テンプレート ---------------------- #
-    html_lines = [
+def get_html_header():
+    """HTMLヘッダーを生成する"""
+    return [
         "<html>",
         "<head><meta charset='utf-8'>",
         "<style>",
@@ -232,10 +216,76 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None):
         ".timestamp-images{display:grid;grid-template-columns:repeat(6,1fr);gap:16px;margin-top:.8em}",
         ".timestamp-image{width:100%;aspect-ratio:16/9;object-fit:contain;background:#eee;border-radius:4px;box-shadow:0 2px 4px rgba(0,0,0,.1);transition:transform .3s ease,box-shadow .3s ease;cursor:pointer}",
         ".timestamp-image:hover{transform:scale(2);z-index:10;box-shadow:0 8px 16px rgba(0,0,0,.2);border:2px solid #ff9800}",
+        ".jump-link{background:#333;padding:10px;margin:10px 0;border-radius:5px;text-align:center}",
+        ".detail-section{border-top:2px solid #666;margin-top:2em;padding-top:2em}",
         "</style>",
         "</head>",
         "<body>"
     ]
+
+def markdown_to_html(text):
+    """MarkdownテキストをHTMLに変換する"""
+    lines = text.split('\n')
+    html_lines = []
+    in_list = False
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        # 見出し
+        if line.startswith('#'):
+            if in_list:
+                html_lines.append("</ul>")
+                in_list = False
+            level = min(len(line) - len(line.lstrip('#')), 4)
+            heading_text = line.lstrip('#').strip()
+            html_lines.append(f"<h{level}>{heading_text}</h{level}>")
+        # リスト項目
+        elif line.startswith('*') or line.startswith('-'):
+            if not in_list:
+                html_lines.append("<ul>")
+                in_list = True
+            item_text = line.lstrip('*-').strip()
+            item_html = re.sub(r"\*\*(.*?)\*\*", r"<b>\\1</b>", item_text)
+            html_lines.append(f"<li>{item_html}</li>")
+        # 通常の段落
+        else:
+            if in_list:
+                html_lines.append("</ul>")
+                in_list = False
+            replaced = re.sub(r"\*\*(.*?)\*\*", r"<b>\\1</b>", line)
+            html_lines.append(f"<p>{replaced}</p>")
+    
+    if in_list:
+        html_lines.append("</ul>")
+    
+    return '\n'.join(html_lines)
+
+def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_text=None):
+    """Markdown ライクなテキストを HTML に変換（バグフィックス版）
+
+    - 見出し / 本文 → 画像 → リンク の順序を保証
+    - タイムスタンプ表記は
+        * 3時間4分5秒頃
+        * 10分5秒頃
+        * 5秒頃         ← 分が省略されている場合は 0分と解釈
+    - **…** を正しく <b>…</b> に変換（\1 が残るバグ修正）
+    - 中身の無いリスト項目（例: "* **"）を無視
+    - 末尾で元テキストを .txt としても保存
+    """
+
+    # ---------------------- HTML テンプレート ---------------------- #
+    html_lines = get_html_header()
+    
+    # 詳細セクションへのジャンプリンクを追加（詳細テキストがある場合のみ）
+    if detail_text:
+        html_lines.extend([
+            "<div class='jump-link'>",
+            "<a href='#detail-section'>📄 詳細に飛ぶ</a>",
+            "</div>"
+        ])
 
     # ---------------------- 正規表現 ---------------------- #
     ts_pattern = re.compile(r"(?:([0-9]+)時間)?(?:([0-9]+)分)?([0-9]+)秒頃")
@@ -355,6 +405,15 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None):
         current["body"].append("</ul>")
     flush()
 
+    # ---------------------- 詳細セクション追加 ---------------------- #
+    if detail_text:
+        html_lines.extend([
+            "<div id='detail-section' class='detail-section'>",
+            "<h2>📄 詳細内容</h2>",
+            markdown_to_html(detail_text),
+            "</div>"
+        ])
+
     # ---------------------- クローズ & テキスト保存 ---------------------- #
     html_lines.append("</body></html>")
     with open(output_html_path, "w", encoding="utf-8") as fp:
@@ -380,7 +439,27 @@ def read_vtt(vtt):
 
     return result_merged_txt 
 
-def do(vtt_path, video_title, output_dir, url=None, images=None):
+def generate_detail_text(vtt_content, title):
+    """VTTファイルから詳細テキストを生成"""
+    model_detail = configure_gemini('gemini-2.5-flash')
+    
+    format_prompt = (
+        "字幕ファイルを整形し、読みやすい日本語の文章にして。"
+        "内容は省略せず、ただし誤字や、文意から見て明らかな単語の間違いや、重複はなくして整理して。"
+        "見出しを付けて。"
+        f"タイトルは「{title}」です。\n\n"
+        + '\n'.join(vtt_content)
+    )
+    
+    try:
+        chat = model_detail.start_chat()
+        response = chat.send_message(format_prompt)
+        return response.text
+    except Exception as e:
+        print(f"詳細テキスト生成でエラーが発生しました: {str(e)}")
+        return None
+
+def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=False):
     """
     VTTファイルを要約してHTMLを生成する
     
@@ -390,6 +469,7 @@ def do(vtt_path, video_title, output_dir, url=None, images=None):
         output_dir: 出力ディレクトリ
         url: 動画のURL（オプション）
         images: 画像情報のリスト（オプション）
+        detail_mode: 詳細モードかどうか（オプション）
     
     Returns:
         str: 生成されたHTMLファイルのパス
@@ -409,7 +489,14 @@ def do(vtt_path, video_title, output_dir, url=None, images=None):
     #no cokkieのため、URLを変換
     url_base = url_base.replace('www.youtube.com/', 'www.yout-ube.com/')
     
-    yoyaku_gemini(vtt, title, html_path, images)
+    # 詳細テキストを生成（詳細モードの場合のみ）
+    detail_text = None
+    if detail_mode:
+        print('\n詳細テキストを生成中...')
+        vtt_content = read_vtt(vtt)
+        detail_text = generate_detail_text(vtt_content, title)
+    
+    yoyaku_gemini(vtt, title, html_path, images, detail_text)
     return html_path
 
 if __name__ == "__main__":

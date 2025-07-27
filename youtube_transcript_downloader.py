@@ -394,6 +394,10 @@ def is_running_from_bat():
     """batファイルから実行されているかどうかを判定"""
     return "--from-bat" in sys.argv
 
+def is_detail_mode():
+    """詳細モードかどうかを判定"""
+    return "--detail" in sys.argv
+
 def process_video(url):
     """動画処理のメインロジック"""
     video_id = get_video_id(url)
@@ -425,7 +429,13 @@ def process_video(url):
             # 画像をダウンロードしてスライス（1回のみ実行）
             print("\nストーリーボード画像の処理を開始...")
             images = dl_images(url, images_dir)
-            html_path = create_summary(result, video_title, output_dir, video_url, images)
+            
+            # 詳細モードかどうかを確認
+            detail_mode = is_detail_mode()
+            if detail_mode:
+                print("詳細モードで実行中...")
+                
+            html_path = create_summary(result, video_title, output_dir, video_url, images, detail_mode)
             print(f"要約HTMLが作成されました: {html_path}")
             
             # VTTファイルを削除
