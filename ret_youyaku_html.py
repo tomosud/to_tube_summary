@@ -449,8 +449,9 @@ def read_vtt(vtt):
 
 def generate_detail_text(vtt_content, title):
     """VTTファイルから詳細テキストを生成"""
-    model_detail = configure_gemini('gemini-2.5-flash')
-    
+    #model_detail = configure_gemini('gemini-2.5-flash')
+    model_detail = configure_gemini('gemini-2.0-flash')
+
     format_prompt = (
         "字幕ファイルを整形し、読みやすい日本語の文章にして。"
         "内容は省略せず、ただし誤字や、文意から見て明らかな単語の間違いや、重複はなくして整理して。"
