@@ -254,7 +254,8 @@ def download_transcript(video_id, output_dir):
         print("利用可能な字幕を確認中...")
         # 利用可能な字幕のリストを取得
         try:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            ytt_api = YouTubeTranscriptApi()
+            transcript_list = ytt_api.list(video_id)
         except Exception as e:
             print(f"字幕リスト取得エラー: {str(e)}")
             # 英語エラーメッセージを日本語に変換して表示

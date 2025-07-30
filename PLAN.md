@@ -1,82 +1,76 @@
 # 詳細版実装計画
 
+## 2025年7月30日時点のステータス
+
+### ✅ 完了した実装
+- **youtube-transcript-api 1.2.1対応**: 古いAPI仕様 `YouTubeTranscriptApi.list_transcripts()` から新しい仕様 `ytt_api = YouTubeTranscriptApi(); ytt_api.list()` に更新
+- **詳細モード機能**: `--detail` フラグによる詳細テキスト生成機能の実装
+- **エントリポイント**: `to_tube_summary_detail.bat` の作成
+- **HTML出力拡張**: 詳細セクションと「詳細に飛ぶ」リンクの実装
+
+### 🔧 技術的修正事項
+- `youtube_transcript_downloader.py:257`: APIコール方法を新しい仕様に対応
+- 動作確認済み: 字幕取得、詳細テキスト生成、HTML出力が正常に動作
+
 ## 現状の理解
 
 ### 既存システム
 - **エントリポイント**: `to_tube_summary.bat` → `youtube_transcript_downloader.py`
+- **詳細版エントリポイント**: `to_tube_summary_detail.bat` → `youtube_transcript_downloader.py --detail`
 - **処理フロー**:
   1. YouTubeURLからvideoIDを取得
-  2. 字幕をVTTファイルとしてダウンロード
+  2. 字幕をVTTファイルとしてダウンロード（youtube-transcript-api 1.2.1使用）
   3. `ret_youyaku_html.py`で要約HTMLを生成
-  4. ストーリーボード画像をスライスして表示
-  5. HTMLをブラウザで開く
+  4. 詳細モードの場合、詳細テキストも生成
+  5. ストーリーボード画像をスライスして表示
+  6. HTMLをブラウザで開く
 
-### 既存の関数構成
+### 現在の関数構成
 - `youtube_transcript_downloader.py:process_video()`: メイン処理
-- `ret_youyaku_html.py:do()`: 要約HTML生成
+- `ret_youyaku_html.py:do()`: 要約HTML生成（詳細モード対応済み）
 - `ret_youyaku_html.py:yoyaku_gemini()`: Gemini APIで要約生成
+- `ret_youyaku_html.py:generate_detail_text()`: 詳細テキスト生成
 
-## 追加機能の仕様
+## 実装された機能の詳細
 
-### 目標
-- 既存の出力HTMLに加えて、より詳細なテキストを追加
-- 詳細テキストは`detail_txt`関数の処理を参考にする
-- HTMLの最初に「詳細に飛ぶ」リンクを追加
+### 詳細テキスト生成機能
+- `ret_youyaku_html.py`に`generate_detail_text()`関数を実装
+- gemini-2.0-flashモデルを使用して詳細テキストを生成
+- 字幕ファイルを整形し、読みやすい日本語の文章に変換
 
-### detail_txt関数の分析
-```python
-def detail_txt(vtt_path, title):
-    # gemini-2.5-flashを使用
-    # プロンプト: "字幕ファイルを整形し、読みやすい日本語の文章にして..."
-    # 誤字修正、重複削除、見出し付与
-    # 出力: Markdown形式の整形テキスト
-```
-
-## 実装計画
-
-### ステップ1: 詳細テキスト生成機能の追加
-- `ret_youyaku_html.py`に`generate_detail_text()`関数を追加
-- `detail_txt`関数のロジックを参考にしたプロンプトを作成
-- gemini-2.5-flashモデルを使用して詳細テキストを生成
-
-### ステップ2: HTML出力の拡張
-- `txt_to_html()`関数を修正
+### HTML出力の拡張
+- `txt_to_html()`関数で詳細モード対応
 - HTMLの上部に「詳細に飛ぶ」リンクを追加
 - 既存の要約の後に詳細セクションを追加
 - 詳細セクションはMarkdownからHTMLに変換
 
-### ステップ3: 新しいエントリポイントの作成
+### 新しいエントリポイント
 - `to_tube_summary_detail.bat`を作成
-- `youtube_transcript_downloader.py`に`--detail`フラグを追加
+- `youtube_transcript_downloader.py`で`--detail`フラグを処理
 - 詳細モードの場合のみ詳細テキスト生成を実行
 
-### ステップ4: 既存コードとの統合
-- 既存の処理フローを変更せず、追加機能として実装
-- 関数の共有を最大化してコード重複を避ける
-- エラーハンドリングを適切に実装
+## 依存関係とAPIバージョン
 
-## 技術的考慮事項
+### 重要な技術的更新
+- **youtube-transcript-api**: バージョン1.2.1に対応済み
+  - 旧API: `YouTubeTranscriptApi.list_transcripts(video_id)`
+  - 新API: `ytt_api = YouTubeTranscriptApi(); ytt_api.list(video_id)`
+- **Geminiモデル**: gemini-2.0-flashを使用
+- **Python要件**: 3.8以上
 
 ### 関数の共有
 - `configure_gemini()`関数を共有
 - `read_vtt()`関数を共有
 - HTMLテンプレート部分を共有
 
-### プロンプト設計
-- detail_txt関数のプロンプトをベースにする
-- 既存の要約とは異なる詳細度で出力
-- HTML向けに適切な形式で出力
+## 今後のメンテナンス考慮事項
 
-### ファイル構成
-- 新しいファイルは最小限に抑える
+### APIバージョン管理
+- youtube-transcript-api の新しいバージョンリリース時の対応方法
+- Gemini APIの仕様変更への対応
+- 互換性テストの実行方法
+
+### ファイル構成の原則
+- 新しいファイルは最小限に抑制
 - 既存ファイルの修正は機能追加のみ
 - 後方互換性を維持
-
-## 実装順序
-
-1. `ret_youyaku_html.py`に詳細テキスト生成機能を追加
-2. HTML出力機能を拡張（ジャンプリンク + 詳細セクション）
-3. `youtube_transcript_downloader.py`にフラグ処理を追加
-4. `to_tube_summary_detail.bat`を作成
-5. テスト実行と調整
-6. README.mdの更新
