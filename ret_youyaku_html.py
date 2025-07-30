@@ -123,7 +123,7 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None):
     "内容を省略しすぎず、文字数が増えても、話題の結論まで書いて。一目で構造が把握できるように、見出し（大見出し・小見出し）を付けてください。"
     "見出しだけ読んでも、内容の流れがわかるように工夫してください。適切に改行や、段落分けを行い、読みやすい文章にしてください。"
     f"{add}"
-    "英語の人名や固有名詞は原文通りに保ってください。"
+    #"英語の人名や固有名詞は原文通りに保ってください。"
     "この指示への返答は不要です。出力は内容のみを表示し、最後に「以上」と記載してください。\n\n"
     )
 
@@ -248,14 +248,18 @@ def markdown_to_html(text):
                 html_lines.append("<ul>")
                 in_list = True
             item_text = line.lstrip('*-').strip()
-            item_html = re.sub(r"\*\*(.*?)\*\*", r"<b>\\1</b>", item_text)
+            item_html = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", item_text)
+            # 対応しない単独の**を除去
+            item_html = re.sub(r"\*\*", "", item_html)
             html_lines.append(f"<li>{item_html}</li>")
         # 通常の段落
         else:
             if in_list:
                 html_lines.append("</ul>")
                 in_list = False
-            replaced = re.sub(r"\*\*(.*?)\*\*", r"<b>\\1</b>", line)
+            replaced = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", line)
+            # 対応しない単独の**を除去
+            replaced = re.sub(r"\*\*", "", replaced)
             html_lines.append(f"<p>{replaced}</p>")
     
     if in_list:
@@ -389,7 +393,9 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
             # スキップ: 空 or "**" のみ
             if re.fullmatch(r"\*\*\s*\*\*", item_raw.strip()):
                 continue
-            item_html = re.sub(r"\*\*(.*?)\*\*", r"<b>\\1</b>", item_raw)
+            item_html = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", item_raw)
+            # 対応しない単独の**を除去
+            item_html = re.sub(r"\*\*", "", item_html)
             current["body"].append(f"<li>{item_html}</li>")
         else:
             if in_list:
@@ -398,7 +404,9 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
             if line.startswith("http://") or line.startswith("https://"):
                 current["body"].append(f'<p><a href="{line}" target="_blank">{line}</a></p>')
             else:
-                replaced = re.sub(r"\*\*(.*?)\*\*", r"<b>\\1</b>", line)
+                replaced = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", line)
+                # 対応しない単独の**を除去
+                replaced = re.sub(r"\*\*", "", replaced)
                 current["body"].append(f"<p>{replaced}</p>")
 
     if in_list:
@@ -446,7 +454,7 @@ def generate_detail_text(vtt_content, title):
     format_prompt = (
         "字幕ファイルを整形し、読みやすい日本語の文章にして。"
         "内容は省略せず、ただし誤字や、文意から見て明らかな単語の間違いや、重複はなくして整理して。"
-        "見出しを付けて。"
+        "見出しを付けて。この指示への返答は不要です。出力は内容のみを表示し、最後に「以上」と記載してください。"
         f"タイトルは「{title}」です。\n\n"
         + '\n'.join(vtt_content)
     )
