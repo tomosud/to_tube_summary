@@ -42,3 +42,5 @@ api_key.txt
 #other
 *.bak
 /sample
+/.serena
+/.claude
