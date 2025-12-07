@@ -1,27 +1,27 @@
 import os
 import re
-import google.generativeai as genai
+from openai import OpenAI
 import tkinter as tk
 from tkinter import simpledialog
 
 def get_api_key():
     """APIキーを取得または設定する"""
     api_key_file = "api_key.txt"
-    
+
     # ファイルが存在する場合はそこからAPIキーを読み込む
     if os.path.exists(api_key_file):
         with open(api_key_file, "r") as f:
             return f.read().strip()
-    
+
     # ファイルが存在しない場合はダイアログを表示して入力を求める
     root = tk.Tk()
     root.withdraw()  # メインウィンドウを非表示
-    
+
     api_key = simpledialog.askstring(
         "API Key 設定",
-        "Google APIキーを入力してください：\n（入力されたキーはapi_key.txtに保存されます）"
+        "OpenAI APIキーを入力してください：\n（入力されたキーはapi_key.txtに保存されます）"
     )
-    
+
     if api_key:
         # APIキーをファイルに保存
         with open(api_key_file, "w") as f:
@@ -30,17 +30,15 @@ def get_api_key():
     else:
         raise ValueError("APIキーが設定されていません。")
 
-def configure_gemini(model_name='gemini-2.0-flash'):
-    """Geminiモデルを設定する"""
-    return genai.GenerativeModel(model_name)
-
 # APIキーを設定
 apikey = get_api_key()
 print('---apikey set!')
 
-genai.configure(api_key=apikey)
+# OpenAIクライアントを初期化
+client = OpenAI(api_key=apikey)
 
-model = configure_gemini('gemini-2.0-flash')
+# 使用するモデル
+MODEL_NAME = 'gpt-5-nano-2025-08-07'
 
 
 
@@ -172,22 +170,43 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None):
 
     f1text += '\n'.join(result_merged_txt)
 
-    chat = model.start_chat()  # 初回のみセッション開始
+    # OpenAI APIでチャット履歴を管理
+    messages = []
 
     while True:
-        responseA = chat.send_message(f1text)
+        # 最初のメッセージを送信
+        messages = [{"role": "user", "content": f1text}]
+
+        responseA = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=messages
+        )
+
+        responseA_text = responseA.choices[0].message.content
 
         #見出しの時間が良い分散になっているかを確認
-        if judge_good_time_split(responseA.text.split('\n'), result_merged_txt):
+        if judge_good_time_split(responseA_text.split('\n'), result_merged_txt):
+            # 成功したらアシスタントの応答を履歴に追加
+            messages.append({"role": "assistant", "content": responseA_text})
             break  # 成功したらループ終了
         else:
-            chat = model.start_chat()  # 不適切なら新しくセッションを作り直す
             print('分散が悪いので、再度要約を実行します。')
+            # 不適切なら新しくセッションを作り直す（messagesをリセット）
 
     # 回答を踏まえた次の質問
-    responseB = chat.send_message("では、その内容の興味深いポイントをまとめて。200文字程度で日本語で。「動画のポイント」という見出しを付けて。この講演に興味を持つ人が特記したいような内容を。全般的でなくとも、特徴的な点を。またこっちは文末に「以上」は不要。")
+    messages.append({
+        "role": "user",
+        "content": "では、その内容の興味深いポイントをまとめて。200文字程度で日本語で。「動画のポイント」という見出しを付けて。この講演に興味を持つ人が特記したいような内容を。全般的でなくとも、特徴的な点を。またこっちは文末に「以上」は不要。"
+    })
 
-    result = responseB.text.split('\n') + ['\n'] + [url_base] + responseA.text.split('\n')
+    responseB = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=messages
+    )
+
+    responseB_text = responseB.choices[0].message.content
+
+    result = responseB_text.split('\n') + ['\n'] + [url_base] + responseA_text.split('\n')
     
     # HTMLファイルを生成
     txt_to_html(result, output_html_path, url_base, images, detail_text)
@@ -526,9 +545,6 @@ def read_vtt(vtt):
 
 def generate_detail_text(vtt_content, title):
     """VTTファイルから詳細テキストを生成"""
-    #model_detail = configure_gemini('gemini-2.5-flash')
-    model_detail = configure_gemini('gemini-2.0-flash')
-
     format_prompt = (
         "字幕ファイルを整形し、 必要なら和訳して、読みやすい日本語の文章にして。"
         "内容は省略せず、ただし誤字や、文意から見て明らかな単語の間違いや、重複はなくして整理して。"
@@ -536,11 +552,13 @@ def generate_detail_text(vtt_content, title):
         f"タイトルは「{title}」です。\n\n"
         + '\n'.join(vtt_content)
     )
-    
+
     try:
-        chat = model_detail.start_chat()
-        response = chat.send_message(format_prompt)
-        return response.text
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": format_prompt}]
+        )
+        return response.choices[0].message.content
     except Exception as e:
         print(f"詳細テキスト生成でエラーが発生しました: {str(e)}")
         return None

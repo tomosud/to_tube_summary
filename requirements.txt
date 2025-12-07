@@ -3,4 +3,4 @@ youtube_transcript_api
 yt-dlp
 Pillow
 requests
-google-generativeai
+openai
