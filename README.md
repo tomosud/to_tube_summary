@@ -1,7 +1,11 @@
 # YouTube動画要約ツール
 
 Windowsで動作するYouTube動画の要約ツールです。YouTubeのURLをクリップボードにコピーして実行すると、その動画の内容を要約したHTMLファイルを生成します。
-要約にはgeminiを使用します。またYouTubeのstoryboardからサムネイルを作成します。
+
+要約にはOpenAI APIを使用します。（Geminiの無料枠があまり使えなくなったので対応）
+gpt-5-nano-2025-08-07 を使用します。一回当たり数円程度と思われますが自己責任で。
+
+またYouTubeのstoryboardからサムネイルを作成します。
 
 ![image](https://github.com/user-attachments/assets/51177fbd-f2d7-4e65-a5b6-998de72b5376)
 
@@ -10,8 +14,13 @@ Windowsで動作するYouTube動画の要約ツールです。YouTubeのURLを�
 
 - Windows 10/11
 - Python 3.8以上
-- Google Cloud Platformで取得したGemini API Key
-  - [Google AI Studio](https://aistudio.google.com/app/apikey)からAPIキーを取得できます
+- openAIのAPIキー
+
+openAIのAPIキーには、学習利用を条件にした無料枠がありプロジェクトを指定できるので、専用のプロジェクトを作りAPIKeyを発行すると良いかも。
+
+参考
+https://qiita.com/youtoy/items/2930eaa43082555b5d5f
+
   - 初回実行時にダイアログで入力を求められます
 
 ## セットアップ
@@ -30,12 +39,6 @@ Windowsで動作するYouTube動画の要約ツールです。YouTubeのURLを�
    - 自動的に字幕をダウンロードし、内容を要約したHTMLファイルを生成
    - 生成されたHTMLファイルには動画の各部分へのリンクが含まれており、クリックすると該当シーンにジャンプできます
 
-### 詳細版（推奨）
-1. YouTubeの動画ページでURLをコピー（クリップボードに保存）
-2. `to_tube_summary_detail.bat`を実行
-   - 基本版の機能に加えて、さらに詳細なテキストを生成
-   - HTML上部に「詳細に飛ぶ」リンクが表示され、詳細セクションに移動可能
-   - 要約内容をより詳しく、整形された形で閲覧できます
 
 ### 初回実行時の設定
 - 初回実行時にGemini APIキーの入力を求められます
