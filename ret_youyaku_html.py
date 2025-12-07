@@ -38,8 +38,8 @@ print('---apikey set!')
 client = OpenAI(api_key=apikey)
 
 # 使用するモデル
-MODEL_NAME = 'gpt-5-nano-2025-08-07'
-
+#MODEL_NAME = 'gpt-5-nano-2025-08-07'
+MODEL_NAME = 'gpt-5-mini-2025-08-07'
 
 
 # グローバル変数
