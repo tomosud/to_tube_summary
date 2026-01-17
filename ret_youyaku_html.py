@@ -323,7 +323,12 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
 
     # ---------------------- HTML テンプレート ---------------------- #
     html_lines = get_html_header()
-    
+
+    # ---------------------- サムネイル画像をページ最上部に表示 ---------------------- #
+    if thumbnail_path and os.path.exists(thumbnail_path):
+        rel = os.path.relpath(thumbnail_path, os.path.dirname(output_html_path)).replace('\\', '/')
+        html_lines.append(f'<img src="{rel}" class="video-thumbnail" alt="Video Thumbnail">')
+
     # 詳細セクションへのジャンプリンクを追加（詳細テキストがある場合のみ）
     if detail_text:
         html_lines.extend([
@@ -388,14 +393,6 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
         current = {"heading": "", "body": [], "images": "", "link": ""}
 
     in_list = False
-    title_thumbnail_added = False  # サムネイルが追加済みかどうか
-
-    # ---------------------- サムネイル画像のHTML生成関数 ---------------------- #
-    def build_thumbnail_html():
-        if not thumbnail_path or not os.path.exists(thumbnail_path):
-            return ""
-        rel = os.path.relpath(thumbnail_path, os.path.dirname(output_html_path)).replace('\\', '/')
-        return f'<img src="{rel}" class="video-thumbnail" alt="Video Thumbnail">'
 
     # ---------------------- メインループ ---------------------- #
     for idx, raw in enumerate(lines):
@@ -410,14 +407,6 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
             level = min(len(m_h.group(1)), 4)
             heading_text = m_h.group(2).strip()
             current["heading"] = f"<h{level}>{heading_text}</h{level}>"
-
-            # 最初の見出し（タイトル）の後にサムネイルを追加
-            if not title_thumbnail_added:
-                thumb_html = build_thumbnail_html()
-                if thumb_html:
-                    current["heading"] += f"\n{thumb_html}"
-                title_thumbnail_added = True
-
             ts_sec = parse_timestamp(heading_text)
             if ts_sec is not None:
                 next_sec = next((sec for i2, sec in timestamps if i2 > idx), None)

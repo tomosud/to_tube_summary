@@ -97,70 +97,95 @@ def download_and_slice_image(url, video_id, start_time, duration, cols, rows, fr
         print(f"⚠️ 画像処理エラー: {str(e)}")
         return []
 
-def download_thumbnail(video_id, output_dir):
+def download_thumbnail_from_info(thumbnails, output_dir):
     """
-    YouTubeのサムネイル画像を取得してThumbnail.jpgとして保存
+    yt-dlpから取得したサムネイル情報を使ってサムネイル画像を保存
 
     優先順位:
-    1. maxresdefault.jpg (1280x720) - カスタムサムネイルまたは高解像度
-    2. hqdefault.jpg (480x360) - フォールバック
+    1. maxres (1280x720) - カスタムサムネイルまたは高解像度
+    2. より大きい解像度のサムネイル
 
     Args:
-        video_id: YouTube動画ID
+        thumbnails: yt-dlpのinfo['thumbnails']リスト
         output_dir: 出力ディレクトリ（HTMLと同じ階層）
 
     Returns:
         str: 保存したサムネイルのパス、失敗時はNone
     """
-    thumbnail_urls = [
-        f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
-        f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg",
-    ]
+    if not thumbnails:
+        print("⚠️ サムネイル情報がありません")
+        return None
 
     output_path = os.path.join(output_dir, "Thumbnail.jpg")
 
-    for url in thumbnail_urls:
+    # サムネイルを解像度でソート（大きい順）
+    # widthとheightがない場合もあるので、preferenceやidで判断
+    def get_resolution(t):
+        w = t.get('width', 0) or 0
+        h = t.get('height', 0) or 0
+        return w * h
+
+    sorted_thumbnails = sorted(thumbnails, key=get_resolution, reverse=True)
+
+    for thumb in sorted_thumbnails:
+        thumb_url = thumb.get('url')
+        if not thumb_url:
+            continue
+
         try:
-            response = requests.get(url, timeout=10)
+            response = requests.get(thumb_url, timeout=10)
             if response.status_code == 200:
-                # maxresdefaultが存在しない場合、YouTubeは120x90のデフォルト画像を返すことがある
-                # Content-Lengthで判別（小さすぎる場合はスキップ）
                 content_length = len(response.content)
-                if content_length < 5000 and "maxresdefault" in url:
-                    print(f"⚠️ maxresdefault が存在しないため、次の解像度を試します")
+                # 小さすぎる画像はスキップ（プレースホルダーの可能性）
+                if content_length < 5000:
                     continue
 
                 with open(output_path, 'wb') as f:
                     f.write(response.content)
-                print(f"✅ サムネイル画像を保存: {output_path}")
+                width = thumb.get('width', '?')
+                height = thumb.get('height', '?')
+                print(f"✅ サムネイル画像を保存: {output_path} ({width}x{height})")
                 return output_path
         except Exception as e:
-            print(f"⚠️ サムネイル取得エラー ({url}): {str(e)}")
+            print(f"⚠️ サムネイル取得エラー: {str(e)}")
             continue
 
     print("⚠️ サムネイル画像の取得に失敗しました")
     return None
 
-def dl_images(url, images_dir):
+def dl_images(url, images_dir, output_dir=None):
     """
-    ストーリーボード画像をダウンロードしてスライス
-    
+    ストーリーボード画像とサムネイル画像をダウンロード
+
     各フラグメントの画像は以下のように処理されます：
     1. 元画像を保存（デバッグ用）
     2. 実際の画像サイズを取得して動的にスライス
     3. グリッドに従って画像を分割
     4. 各スライスに正確なタイムスタンプを付与
-    
+
+    Args:
+        url: YouTube動画URL
+        images_dir: ストーリーボード画像の保存先
+        output_dir: サムネイル画像の保存先（HTMLと同じ階層）
+
     Returns:
-        list[tuple]: [(filepath, start_time, end_time), ...]
-    """    # images_dirをパラメータとして受け取る
-    
+        tuple: (storyboard_images, thumbnail_path)
+            - storyboard_images: [(filepath, start_time, end_time), ...]
+            - thumbnail_path: サムネイル画像のパス、失敗時はNone
+    """
     with yt_dlp.YoutubeDL({'skip_download': True}) as ydl:
         info = ydl.extract_info(url, download=False)
         video_id = info['id']
 
+    # サムネイル画像を取得（output_dirが指定されている場合）
+    thumbnail_path = None
+    if output_dir:
+        print("\nサムネイル画像を取得中...")
+        thumbnails = info.get('thumbnails', [])
+        thumbnail_path = download_thumbnail_from_info(thumbnails, output_dir)
+
     # ストーリーボード形式を取得
-    sb1_format = next((f for f in info.get("formats", []) 
+    sb1_format = next((f for f in info.get("formats", [])
                     if f.get("format_note") == "storyboard" and f.get("format_id") == "sb0"), None)
 
     if sb1_format:
@@ -208,10 +233,10 @@ def dl_images(url, images_dir):
             current_time += fragment['duration']
         
         print(f"✅ 合計 {len(all_images)} 枚の画像を保存しました")
-        return all_images
+        return all_images, thumbnail_path
     else:
         print("⚠️ ストーリーボード形式が見つかりませんでした")
-        return []
+        return [], thumbnail_path
 
 def sanitize_filename(title):
     """ファイル名・URLに使えて、日本語も読める形で安全な文字列を返す"""
@@ -471,13 +496,9 @@ def process_video(url):
         try:
             video_url = f"https://www.youtube.com/watch?v={video_id}&t="
 
-            # サムネイル画像をダウンロード（HTMLと同じ階層に保存）
-            print("\nサムネイル画像を取得中...")
-            thumbnail_path = download_thumbnail(video_id, output_dir)
-
-            # 画像をダウンロードしてスライス（1回のみ実行）
-            print("\nストーリーボード画像の処理を開始...")
-            images = dl_images(url, images_dir)
+            # 画像をダウンロードしてスライス（サムネイルも同時取得）
+            print("\nストーリーボード画像とサムネイルの処理を開始...")
+            images, thumbnail_path = dl_images(url, images_dir, output_dir)
 
             # 詳細モードかどうかを確認
             detail_mode = is_detail_mode()
