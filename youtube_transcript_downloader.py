@@ -15,6 +15,8 @@ import html
 import unicodedata
 
 import urllib.parse
+import json
+from datetime import datetime
 
 BASE_DIR = r"C:\temp\html"
 
@@ -183,6 +185,25 @@ def dl_images(url, images_dir, output_dir=None):
         print("\nサムネイル画像を取得中...")
         thumbnails = info.get('thumbnails', [])
         thumbnail_path = download_thumbnail_from_info(thumbnails, output_dir)
+
+        # メタ情報をinfo.jsonとして保存
+        print("\n動画情報を保存中...")
+        video_info = {
+            "title": info.get('title', ''),
+            "uploader": info.get('uploader', ''),
+            "channel": info.get('channel', ''),
+            "description": info.get('description', ''),
+            "upload_date": info.get('upload_date', ''),  # YYYYMMDD形式
+            "duration": info.get('duration', 0),
+            "view_count": info.get('view_count', 0),
+            "video_id": video_id,
+            "url": url,
+            "processed_date": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        info_path = os.path.join(output_dir, "info.json")
+        with open(info_path, 'w', encoding='utf-8') as f:
+            json.dump(video_info, f, ensure_ascii=False, indent=2)
+        print(f"✅ 動画情報を保存: {info_path}")
 
     # ストーリーボード形式を取得
     sb1_format = next((f for f in info.get("formats", [])
