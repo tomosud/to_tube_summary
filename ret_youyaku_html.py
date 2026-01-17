@@ -99,7 +99,7 @@ def judge_good_time_split(text_lines,vtt_lines):
     
     return True
 
-def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None):
+def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, thumbnail_path=None):
     """字幕ファイルを要約してHTMLを生成する"""
     result_merged_txt = read_vtt(vtt)
 
@@ -186,7 +186,7 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None):
     result = responseB_text.split('\n') + ['\n'] + [url_base] + responseA_text.split('\n')
     
     # HTMLファイルを生成
-    txt_to_html(result, output_html_path, url_base, images, detail_text)
+    txt_to_html(result, output_html_path, url_base, images, detail_text, thumbnail_path)
 
 def extract_timestamp(line):
     """行から時間情報を抽出する"""
@@ -257,6 +257,7 @@ def get_html_header():
         ".timestamp-image:hover{transform:scale(2);z-index:10;box-shadow:0 8px 16px rgba(0,0,0,.2);border:2px solid #ff9800}",
         ".jump-link{background:#333;padding:10px;margin:10px 0;border-radius:5px;text-align:center}",
         ".detail-section{border-top:2px solid #666;margin-top:2em;padding-top:2em}",
+        ".video-thumbnail{max-width:640px;width:100%;border-radius:8px;margin:1em 0;box-shadow:0 4px 8px rgba(0,0,0,.3)}",
         "</style>",
         "</head>",
         "<body>"
@@ -306,7 +307,7 @@ def markdown_to_html(text):
     
     return '\n'.join(html_lines)
 
-def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_text=None):
+def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_text=None, thumbnail_path=None):
     """Markdown ライクなテキストを HTML に変換（バグフィックス版）
 
     - 見出し / 本文 → 画像 → リンク の順序を保証
@@ -317,6 +318,7 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
     - **…** を正しく <b>…</b> に変換（\1 が残るバグ修正）
     - 中身の無いリスト項目（例: "* **"）を無視
     - 末尾で元テキストを .txt としても保存
+    - thumbnail_path: サムネイル画像のパス（タイトル下に表示）
     """
 
     # ---------------------- HTML テンプレート ---------------------- #
@@ -386,6 +388,14 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
         current = {"heading": "", "body": [], "images": "", "link": ""}
 
     in_list = False
+    title_thumbnail_added = False  # サムネイルが追加済みかどうか
+
+    # ---------------------- サムネイル画像のHTML生成関数 ---------------------- #
+    def build_thumbnail_html():
+        if not thumbnail_path or not os.path.exists(thumbnail_path):
+            return ""
+        rel = os.path.relpath(thumbnail_path, os.path.dirname(output_html_path)).replace('\\', '/')
+        return f'<img src="{rel}" class="video-thumbnail" alt="Video Thumbnail">'
 
     # ---------------------- メインループ ---------------------- #
     for idx, raw in enumerate(lines):
@@ -400,6 +410,14 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
             level = min(len(m_h.group(1)), 4)
             heading_text = m_h.group(2).strip()
             current["heading"] = f"<h{level}>{heading_text}</h{level}>"
+
+            # 最初の見出し（タイトル）の後にサムネイルを追加
+            if not title_thumbnail_added:
+                thumb_html = build_thumbnail_html()
+                if thumb_html:
+                    current["heading"] += f"\n{thumb_html}"
+                title_thumbnail_added = True
+
             ts_sec = parse_timestamp(heading_text)
             if ts_sec is not None:
                 next_sec = next((sec for i2, sec in timestamps if i2 > idx), None)
@@ -540,10 +558,10 @@ def generate_detail_text(vtt_content, title):
         print(f"詳細テキスト生成でエラーが発生しました: {str(e)}")
         return None
 
-def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=False):
+def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=False, thumbnail_path=None):
     """
     VTTファイルを要約してHTMLを生成する
-    
+
     Args:
         vtt_path: VTTファイルのパス
         video_title: 動画タイトル
@@ -551,7 +569,8 @@ def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=Fal
         url: 動画のURL（オプション）
         images: 画像情報のリスト（オプション）
         detail_mode: 詳細モードかどうか（オプション）
-    
+        thumbnail_path: サムネイル画像のパス（オプション）
+
     Returns:
         str: 生成されたHTMLファイルのパス
     """
@@ -577,7 +596,7 @@ def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=Fal
         vtt_content = read_vtt(vtt)
         detail_text = generate_detail_text(vtt_content, title)
     
-    yoyaku_gemini(vtt, title, html_path, images, detail_text)
+    yoyaku_gemini(vtt, title, html_path, images, detail_text, thumbnail_path)
     return html_path
 
 if __name__ == "__main__":

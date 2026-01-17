@@ -97,6 +97,50 @@ def download_and_slice_image(url, video_id, start_time, duration, cols, rows, fr
         print(f"⚠️ 画像処理エラー: {str(e)}")
         return []
 
+def download_thumbnail(video_id, output_dir):
+    """
+    YouTubeのサムネイル画像を取得してThumbnail.jpgとして保存
+
+    優先順位:
+    1. maxresdefault.jpg (1280x720) - カスタムサムネイルまたは高解像度
+    2. hqdefault.jpg (480x360) - フォールバック
+
+    Args:
+        video_id: YouTube動画ID
+        output_dir: 出力ディレクトリ（HTMLと同じ階層）
+
+    Returns:
+        str: 保存したサムネイルのパス、失敗時はNone
+    """
+    thumbnail_urls = [
+        f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
+        f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg",
+    ]
+
+    output_path = os.path.join(output_dir, "Thumbnail.jpg")
+
+    for url in thumbnail_urls:
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                # maxresdefaultが存在しない場合、YouTubeは120x90のデフォルト画像を返すことがある
+                # Content-Lengthで判別（小さすぎる場合はスキップ）
+                content_length = len(response.content)
+                if content_length < 5000 and "maxresdefault" in url:
+                    print(f"⚠️ maxresdefault が存在しないため、次の解像度を試します")
+                    continue
+
+                with open(output_path, 'wb') as f:
+                    f.write(response.content)
+                print(f"✅ サムネイル画像を保存: {output_path}")
+                return output_path
+        except Exception as e:
+            print(f"⚠️ サムネイル取得エラー ({url}): {str(e)}")
+            continue
+
+    print("⚠️ サムネイル画像の取得に失敗しました")
+    return None
+
 def dl_images(url, images_dir):
     """
     ストーリーボード画像をダウンロードしてスライス
@@ -426,17 +470,21 @@ def process_video(url):
         print("\n要約処理を開始します...")
         try:
             video_url = f"https://www.youtube.com/watch?v={video_id}&t="
-            
+
+            # サムネイル画像をダウンロード（HTMLと同じ階層に保存）
+            print("\nサムネイル画像を取得中...")
+            thumbnail_path = download_thumbnail(video_id, output_dir)
+
             # 画像をダウンロードしてスライス（1回のみ実行）
             print("\nストーリーボード画像の処理を開始...")
             images = dl_images(url, images_dir)
-            
+
             # 詳細モードかどうかを確認
             detail_mode = is_detail_mode()
             if detail_mode:
                 print("詳細モードで実行中...")
-                
-            html_path = create_summary(result, video_title, output_dir, video_url, images, detail_mode)
+
+            html_path = create_summary(result, video_title, output_dir, video_url, images, detail_mode, thumbnail_path)
             print(f"要約HTMLが作成されました: {html_path}")
             
             # VTTファイルを削除
