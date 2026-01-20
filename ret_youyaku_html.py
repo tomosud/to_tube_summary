@@ -37,9 +37,8 @@ print('---apikey set!')
 # OpenAIクライアントを初期化
 client = OpenAI(api_key=apikey)
 
-# 使用するモデル
-MODEL_NAME = 'gpt-5.2-2025-12-11'
-#MODEL_NAME = 'gpt-5-mini-2025-08-07'
+# 使用するモデル（環境変数から取得、デフォルトはgpt-5.2）
+MODEL_NAME = os.environ.get('OPENAI_MODEL', 'gpt-5.2-2025-12-11')
 
 
 # グローバル変数
@@ -103,7 +102,7 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, t
     """字幕ファイルを要約してHTMLを生成する"""
     result_merged_txt = read_vtt(vtt)
 
-    print('要約中')
+    print(f'要約中（モデル: {MODEL_NAME}）')
 
     
     add = (
