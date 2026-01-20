@@ -3,7 +3,8 @@
     "allow": [
       "Bash(dir:*)",
       "Bash(test:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nモデル名をbatファイルから環境変数で切り替え可能に\n\n- ret_youyaku_html.py: 環境変数OPENAI_MODELからモデル名を取得するように変更\n- ret_youyaku_html.py: 要約開始時に使用モデル名を表示\n- to_tube_summary.bat: 環境変数でgpt-5.2を設定\n- to_tube_summary_detail.bat: 環境変数でgpt-5.2を設定\n- to_tube_summary_cheep.bat: 安価版batを新規作成（gpt-5-mini使用）\n- README.md: 3種類のbatファイルの説明と新規bat作成方法を追記\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ],
     "deny": [],
     "ask": []
