@@ -40,6 +40,36 @@ client = OpenAI(api_key=apikey)
 # 使用するモデル（環境変数から取得、デフォルトはgpt-5.2）
 MODEL_NAME = os.environ.get('OPENAI_MODEL', 'gpt-5.2-2025-12-11')
 
+# トークン使用量の累計
+total_usage = {'input': 0, 'output': 0}
+
+def count_tokens(response):
+    """APIレスポンスからトークン数を取得して累計に加算"""
+    usage = response.usage
+    input_tokens = usage.prompt_tokens
+    output_tokens = usage.completion_tokens
+
+    # 累計に加算
+    total_usage['input'] += input_tokens
+    total_usage['output'] += output_tokens
+
+    return input_tokens, output_tokens
+
+def print_token_summary():
+    """トークン使用量の累計を表示"""
+    input_tok = total_usage['input']
+    output_tok = total_usage['output']
+
+    # 通常モデル（入力$1.75/1M、出力$14.00/1M）
+    normal_cost = (input_tok / 1_000_000) * 1.75 + (output_tok / 1_000_000) * 14.00
+    # 安価モデル（入力$0.25/1M、出力$2.00/1M）
+    cheap_cost = (input_tok / 1_000_000) * 0.25 + (output_tok / 1_000_000) * 2.00
+
+    print(f"\n=== API使用量サマリー ===")
+    print(f"入力トークン: {input_tok:,}")
+    print(f"出力トークン: {output_tok:,}")
+    print(f"合計トークン: {input_tok + output_tok:,}")
+    print(f"価格目安: 通常モデル ${normal_cost:.4f} / 安価モデル ${cheap_cost:.4f}")
 
 # グローバル変数
 url_base = ""
@@ -158,6 +188,10 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, t
             messages=messages
         )
 
+        # トークン数を記録
+        in_tok, out_tok = count_tokens(responseA)
+        print(f"  要約: 入力 {in_tok:,} / 出力 {out_tok:,} トークン")
+
         responseA_text = responseA.choices[0].message.content
 
         #見出しの時間が良い分散になっているかを確認
@@ -179,6 +213,10 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, t
         model=MODEL_NAME,
         messages=messages
     )
+
+    # トークン数を記録
+    in_tok, out_tok = count_tokens(responseB)
+    print(f"  ポイント: 入力 {in_tok:,} / 出力 {out_tok:,} トークン")
 
     responseB_text = responseB.choices[0].message.content
 
@@ -541,6 +579,9 @@ def generate_detail_text(vtt_content, title):
             model=MODEL_NAME,
             messages=[{"role": "user", "content": format_prompt}]
         )
+        # トークン数を記録
+        in_tok, out_tok = count_tokens(response)
+        print(f"  詳細テキスト: 入力 {in_tok:,} / 出力 {out_tok:,} トークン")
         return response.choices[0].message.content
     except Exception as e:
         print(f"詳細テキスト生成でエラーが発生しました: {str(e)}")
@@ -585,6 +626,10 @@ def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=Fal
         detail_text = generate_detail_text(vtt_content, title)
     
     yoyaku_gemini(vtt, title, html_path, images, detail_text, thumbnail_path)
+
+    # トークン使用量サマリーを表示
+    print_token_summary()
+
     return html_path
 
 if __name__ == "__main__":
