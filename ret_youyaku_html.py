@@ -305,8 +305,14 @@ def get_html_header():
         "a{color:#4fc3f7;text-decoration:none}",
         ".timestamp-section{margin:1.5em 0}",
         ".timestamp-images{display:grid;grid-template-columns:repeat(6,1fr);gap:16px;margin-top:.8em}",
-        ".timestamp-image{width:100%;aspect-ratio:16/9;object-fit:contain;background:#eee;border-radius:4px;box-shadow:0 2px 4px rgba(0,0,0,.1);transition:transform .3s ease,box-shadow .3s ease;cursor:pointer}",
-        ".timestamp-image:hover{transform:scale(2);z-index:10;box-shadow:0 8px 16px rgba(0,0,0,.2);border:2px solid #ff9800}",
+        ".thumb-container{position:relative;width:100%;aspect-ratio:16/9}",
+        ".thumb-container:hover{transform:scale(1.875);z-index:100}",
+        ".video-preview{position:absolute;top:0;left:0;width:100%;height:100%;border:none;border-radius:4px;display:none}",
+        ".video-preview.active{display:block}",
+        ".thumb-overlay{position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;background-size:cover;background-position:center;border-radius:4px;cursor:pointer;transition:opacity 0.3s}",
+        ".thumb-overlay::after{content:'▶ Click to play';color:rgba(255,255,255,0.3);font-size:14px;background:rgba(0,0,0,0.3);padding:8px 16px;border-radius:4px}",
+        ".thumb-container:hover .thumb-overlay::after{opacity:0}",
+        ".thumb-overlay.hidden{display:none}",
         ".jump-link{background:#333;padding:10px;margin:10px 0;border-radius:5px;text-align:center}",
         ".detail-section{border-top:2px solid #666;margin-top:2em;padding-top:2em}",
         ".video-thumbnail{max-width:640px;width:100%;border-radius:8px;margin:1em 0;box-shadow:0 4px 8px rgba(0,0,0,.3)}",
@@ -412,12 +418,17 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
         buf = ["<div class='timestamp-images'>"]
         for path, img_start, _ in match_list:
             rel = os.path.relpath(path, os.path.dirname(output_html_path)).replace('\\', '/')
-            mm_i, ss_i = divmod(int(img_start), 60)
+            start_sec = int(img_start)
+            # urlbaseからvideo_idを抽出（例: https://www.youtube-nocookie.com/watch?v=7D0nWcBQyFE&t= → 7D0nWcBQyFE）
+            video_id_match = re.search(r'[?&]v=([a-zA-Z0-9_-]+)', urlbase)
+            video_id = video_id_match.group(1) if video_id_match else ''
+            embed_url = f"https://www.yout-ube.com/watch?v={video_id}&t={start_sec}&autoplay=1&mute=1"
+            click_url = f"{urlbase}{start_sec}"
             buf.append(
-                f'<a href="{urlbase}{int(img_start)}" target="_blank">'
-                f'<img src="{rel}" class="timestamp-image" '
-                f'alt="Screenshot at {mm_i}:{ss_i:02d}" '
-                f'title="クリックして{mm_i}分{ss_i:02d}秒の動画を開く"></a>'
+                f'<div class="thumb-container">'
+                f'<iframe class="video-preview" src="" data-src="{embed_url}" allow="autoplay; encrypted-media; accelerometer; gyroscope; picture-in-picture" allowfullscreen></iframe>'
+                f'<div class="thumb-overlay" style="background-image:url(\'{rel}\')" data-click-url="{click_url}" title="クリックして再生 / Ctrl+クリックで動画ページを開く"></div>'
+                f'</div>'
             )
         buf.append("</div>")
         return "\n".join(buf)
@@ -553,6 +564,26 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
             markdown_to_html(detail_text),
             "</div>"
         ])
+
+    # ---------------------- JavaScript for click to load iframe ---------------------- #
+    html_lines.extend([
+        "<script>",
+        "document.querySelectorAll('.thumb-container').forEach(container => {",
+        "  const overlay = container.querySelector('.thumb-overlay');",
+        "  const iframe = container.querySelector('.video-preview');",
+        "  overlay.addEventListener('click', () => {",
+        "    iframe.src = iframe.dataset.src;",
+        "    iframe.classList.add('active');",
+        "    overlay.classList.add('hidden');",
+        "  });",
+        "  container.addEventListener('mouseleave', () => {",
+        "    iframe.src = '';",
+        "    iframe.classList.remove('active');",
+        "    overlay.classList.remove('hidden');",
+        "  });",
+        "});",
+        "</script>"
+    ])
 
     # ---------------------- クローズ & テキスト保存 ---------------------- #
     html_lines.append("</body></html>")
