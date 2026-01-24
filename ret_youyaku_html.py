@@ -1,5 +1,6 @@
 import os
 import re
+import urllib.parse
 from openai import OpenAI
 import tkinter as tk
 from tkinter import simpledialog
@@ -360,6 +361,8 @@ def get_html_header():
         "details.subtitle-toggle summary:hover{color:#fff;background:#2a2a2a}",
         "details.subtitle-toggle[open] summary{border-bottom:1px solid #333}",
         ".subtitle-content{padding:12px 16px;color:#ccc;font-size:0.9em;line-height:1.8em;white-space:pre-wrap;max-height:400px;overflow-y:auto}",
+        ".ai-summary-link{margin-left:1em;color:#4fc3f7;font-size:0.85em;padding:2px 8px;background:#2a2a2a;border-radius:4px}",
+        ".ai-summary-link:hover{background:#3a3a3a;color:#fff}",
         "</style>",
         "</head>",
         "<body>"
@@ -530,7 +533,9 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
                     subtitle_text = get_subtitle_for_range(vtt_entries, ts_sec, next_sec)
                     if subtitle_text:
                         escaped_text = subtitle_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                        current["subtitle"] = f"<details class='subtitle-toggle'><summary>字幕</summary><div class='subtitle-content'>{escaped_text}</div></details>"
+                        chatgpt_prompt = f"以下は字幕の一部です。省略を行わずに、読み易い日本語の文章として整理して。\n要約をしすぎないでインタビュー記事のように、会話のディティールを残した書き方で。\nただし、長すぎるときは短い見出しなどをつけて読み易く。\n---\n\n{subtitle_text}"
+                        chatgpt_url = f"https://chatgpt.com/?temporary-chat=true&prompt={urllib.parse.quote(chatgpt_prompt, safe='')}"
+                        current["subtitle"] = f"<details class='subtitle-toggle'><summary>字幕 <a href=\"{chatgpt_url}\" target=\"_blank\" class=\"ai-summary-link\" onclick=\"event.stopPropagation()\">AIで要約</a></summary><div class='subtitle-content'>{escaped_text}</div></details>"
             continue
 
         # ----- タイムスタンプ単独行 ----- #
@@ -548,7 +553,9 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
                 subtitle_text = get_subtitle_for_range(vtt_entries, ts_sec_inline, next_sec)
                 if subtitle_text:
                     escaped_text = subtitle_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                    current["subtitle"] = f"<details class='subtitle-toggle'><summary>字幕</summary><div class='subtitle-content'>{escaped_text}</div></details>"
+                    chatgpt_prompt = f"以下は字幕の一部です。省略を行わずに、読み易い日本語の文章として整理して。\n要約をしすぎないでインタビュー記事のように、会話のディティールを残した書き方で。\nただし、長すぎるときは短い見出しなどをつけて読み易く。\n---\n\n{subtitle_text}"
+                    chatgpt_url = f"https://chatgpt.com/?temporary-chat=true&prompt={urllib.parse.quote(chatgpt_prompt, safe='')}"
+                    current["subtitle"] = f"<details class='subtitle-toggle'><summary>字幕 <a href=\"{chatgpt_url}\" target=\"_blank\" class=\"ai-summary-link\" onclick=\"event.stopPropagation()\">AIで要約</a></summary><div class='subtitle-content'>{escaped_text}</div></details>"
             continue
 
         # ----- リスト項目内のタイムスタンプ付き項目を見出し化 ----- #
@@ -581,7 +588,9 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
                     subtitle_text = get_subtitle_for_range(vtt_entries, ts_sec, next_sec)
                     if subtitle_text:
                         escaped_text = subtitle_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                        current["subtitle"] = f"<details class='subtitle-toggle'><summary>字幕</summary><div class='subtitle-content'>{escaped_text}</div></details>"
+                        chatgpt_prompt = f"以下は字幕の一部です。省略を行わずに、読み易い日本語の文章として整理して。\n要約をしすぎないでインタビュー記事のように、会話のディティールを残した書き方で。\nただし、長すぎるときは短い見出しなどをつけて読み易く。\n---\n\n{subtitle_text}"
+                        chatgpt_url = f"https://chatgpt.com/?temporary-chat=true&prompt={urllib.parse.quote(chatgpt_prompt, safe='')}"
+                        current["subtitle"] = f"<details class='subtitle-toggle'><summary>字幕 <a href=\"{chatgpt_url}\" target=\"_blank\" class=\"ai-summary-link\" onclick=\"event.stopPropagation()\">AIで要約</a></summary><div class='subtitle-content'>{escaped_text}</div></details>"
 
             # 本文があれば追加
             if body_text:
