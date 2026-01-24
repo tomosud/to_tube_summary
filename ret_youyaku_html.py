@@ -132,6 +132,9 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, t
     """字幕ファイルを要約してHTMLを生成する"""
     result_merged_txt = read_vtt(vtt)
 
+    # VTTエントリをパース（展開可能な字幕表示用）
+    vtt_entries = parse_vtt_with_timestamps(result_merged_txt)
+
     print(f'要約中（モデル: {MODEL_NAME}）')
 
     
@@ -236,9 +239,9 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, t
     responseB_text = responseB.choices[0].message.content
 
     result = responseB_text.split('\n') + ['\n'] + [url_base] + responseA_text.split('\n')
-    
+
     # HTMLファイルを生成
-    txt_to_html(result, output_html_path, url_base, images, detail_text, thumbnail_path)
+    txt_to_html(result, output_html_path, url_base, images, detail_text, thumbnail_path, vtt_entries)
 
 def extract_timestamp(line):
     """行から時間情報を抽出する"""
@@ -316,6 +319,11 @@ def get_html_header():
         ".jump-link{background:#333;padding:10px;margin:10px 0;border-radius:5px;text-align:center}",
         ".detail-section{border-top:2px solid #666;margin-top:2em;padding-top:2em}",
         ".video-thumbnail{max-width:640px;width:100%;border-radius:8px;margin:1em 0;box-shadow:0 4px 8px rgba(0,0,0,.3)}",
+        "details.subtitle-toggle{margin:1em 0;background:#1e1e1e;border-radius:6px;border:1px solid #333}",
+        "details.subtitle-toggle summary{cursor:pointer;padding:8px 12px;color:#aaa;font-size:0.9em;user-select:none}",
+        "details.subtitle-toggle summary:hover{color:#fff;background:#2a2a2a}",
+        "details.subtitle-toggle[open] summary{border-bottom:1px solid #333}",
+        ".subtitle-content{padding:12px 16px;color:#ccc;font-size:0.9em;line-height:1.8em;white-space:pre-wrap;max-height:400px;overflow-y:auto}",
         "</style>",
         "</head>",
         "<body>"
@@ -365,7 +373,7 @@ def markdown_to_html(text):
     
     return '\n'.join(html_lines)
 
-def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_text=None, thumbnail_path=None):
+def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_text=None, thumbnail_path=None, vtt_entries=None):
     """Markdown ライクなテキストを HTML に変換（バグフィックス版）
 
     - 見出し / 本文 → 画像 → リンク の順序を保証
@@ -377,6 +385,7 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
     - 中身の無いリスト項目（例: "* **"）を無視
     - 末尾で元テキストを .txt としても保存
     - thumbnail_path: サムネイル画像のパス（タイトル下に表示）
+    - vtt_entries: parse_vtt_with_timestamps()の戻り値（展開可能な字幕表示用）
     """
 
     # ---------------------- HTML テンプレート ---------------------- #
@@ -437,7 +446,7 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
     timestamps = [(idx, parse_timestamp(raw)) for idx, raw in enumerate(lines) if parse_timestamp(raw) is not None]
 
     # ---------------------- セクションバッファ ---------------------- #
-    current = {"heading": "", "body": [], "images": "", "link": ""}
+    current = {"heading": "", "body": [], "images": "", "link": "", "subtitle": ""}
 
     def flush():
         nonlocal current
@@ -452,8 +461,10 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
             html_lines.append(current["images"])
         if current["link"]:
             html_lines.append(current["link"])
+        if current["subtitle"]:
+            html_lines.append(current["subtitle"])
         html_lines.append("</div>")
-        current = {"heading": "", "body": [], "images": "", "link": ""}
+        current = {"heading": "", "body": [], "images": "", "link": "", "subtitle": ""}
 
     in_list = False
 
@@ -478,6 +489,12 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
                     if imgs:
                         current["images"] = build_image_block(imgs)
                 current["link"] = f'<p><a href="{urlbase}{ts_sec}" target="_blank">▶ 動画：{format_timestamp(ts_sec)}</a></p>'
+                # 展開可能な字幕を追加
+                if vtt_entries:
+                    subtitle_text = get_subtitle_for_range(vtt_entries, ts_sec, next_sec)
+                    if subtitle_text:
+                        escaped_text = subtitle_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                        current["subtitle"] = f"<details class='subtitle-toggle'><summary>字幕</summary><div class='subtitle-content'>{escaped_text}</div></details>"
             continue
 
         # ----- タイムスタンプ単独行 ----- #
@@ -490,6 +507,12 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
                 if imgs:
                     current["images"] = build_image_block(imgs)
             current["link"] = f'<p><a href="{urlbase}{ts_sec_inline}" target="_blank">▶ 動画：{format_timestamp(ts_sec_inline)}</a></p>'
+            # 展開可能な字幕を追加
+            if vtt_entries:
+                subtitle_text = get_subtitle_for_range(vtt_entries, ts_sec_inline, next_sec)
+                if subtitle_text:
+                    escaped_text = subtitle_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    current["subtitle"] = f"<details class='subtitle-toggle'><summary>字幕</summary><div class='subtitle-content'>{escaped_text}</div></details>"
             continue
 
         # ----- リスト項目内のタイムスタンプ付き項目を見出し化 ----- #
@@ -517,6 +540,12 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
                     if imgs:
                         current["images"] = build_image_block(imgs)
                 current["link"] = f'<p><a href="{urlbase}{ts_sec}" target="_blank">▶ 動画：{format_timestamp(ts_sec)}</a></p>'
+                # 展開可能な字幕を追加
+                if vtt_entries:
+                    subtitle_text = get_subtitle_for_range(vtt_entries, ts_sec, next_sec)
+                    if subtitle_text:
+                        escaped_text = subtitle_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                        current["subtitle"] = f"<details class='subtitle-toggle'><summary>字幕</summary><div class='subtitle-content'>{escaped_text}</div></details>"
 
             # 本文があれば追加
             if body_text:
@@ -608,7 +637,142 @@ def read_vtt(vtt):
         # テキスト行を追加
         result_merged_txt.append(line.strip())
 
-    return result_merged_txt 
+    return result_merged_txt
+
+def parse_vtt_with_timestamps(vtt_lines):
+    """VTTファイルをパースして、タイムスタンプとテキストのリストを返す
+
+    Returns:
+        list of tuples: [(start_seconds, end_seconds, text), ...]
+    """
+    # より柔軟な正規表現（1-2桁の時間/分/秒、1-3桁のミリ秒に対応）
+    timecode_pattern = re.compile(r'(\d{1,2}):(\d{1,2}):(\d{1,2})[\.,](\d{1,3})\s*-->\s*(\d{1,2}):(\d{1,2}):(\d{1,2})[\.,](\d{1,3})')
+
+    entries = []
+    current_start = None
+    current_end = None
+    current_text_lines = []
+
+    for line in vtt_lines:
+        line = line.strip()
+
+        # タイムコード行をチェック
+        match = timecode_pattern.match(line)
+        if match:
+            # 前のエントリがあれば保存
+            if current_start is not None and current_text_lines:
+                text = ' '.join(current_text_lines).strip()
+                if text:
+                    entries.append((current_start, current_end, text))
+
+            # 新しいタイムコードを解析
+            h1, m1, s1, ms1 = map(int, match.groups()[:4])
+            h2, m2, s2, ms2 = map(int, match.groups()[4:])
+            current_start = h1 * 3600 + m1 * 60 + s1 + ms1 / 1000.0
+            current_end = h2 * 3600 + m2 * 60 + s2 + ms2 / 1000.0
+            current_text_lines = []
+        elif line and current_start is not None:
+            # テキスト行（メタデータ行は除外）
+            # WEBVTT、数字のみの行、Kind:、Language:、NOTE などを除外
+            if (not line.startswith('WEBVTT') and
+                not re.match(r'^\d+$', line) and
+                not line.startswith('Kind:') and
+                not line.startswith('Language:') and
+                not line.startswith('NOTE')):
+                current_text_lines.append(line)
+
+    # 最後のエントリを保存
+    if current_start is not None and current_text_lines:
+        text = ' '.join(current_text_lines).strip()
+        if text:
+            entries.append((current_start, current_end, text))
+
+    return entries
+
+def get_subtitle_for_range(vtt_entries, start_sec, end_sec):
+    """指定した時間範囲の字幕テキストを取得して整形する
+
+    Args:
+        vtt_entries: parse_vtt_with_timestamps()の戻り値
+        start_sec: 開始秒数
+        end_sec: 終了秒数（Noneの場合は最後まで）
+
+    Returns:
+        str: 整形された字幕テキスト
+    """
+    if end_sec is None:
+        end_sec = float('inf')
+
+    # 指定範囲のテキストを収集
+    texts = []
+    for entry_start, _entry_end, text in vtt_entries:
+        if entry_start >= start_sec and entry_start < end_sec:
+            texts.append(text)
+
+    # 重複を除去しながら結合（YouTubeのスクロール字幕形式に対応）
+    merged_texts = []
+    for text in texts:
+        # 前のテキストと完全に同じなら除去
+        if merged_texts and text == merged_texts[-1]:
+            continue
+
+        # 前のテキストの末尾と現在のテキストの先頭が重複している場合、重複部分を除去してマージ
+        if merged_texts:
+            prev_text = merged_texts[-1]
+            # 重複部分を探す（前のテキストの末尾と現在のテキストの先頭）
+            overlap_found = False
+            # 最大で前のテキストの半分程度まで重複をチェック
+            max_overlap = min(len(prev_text), len(text), 50)
+            for overlap_len in range(max_overlap, 2, -1):
+                if prev_text.endswith(text[:overlap_len]):
+                    # 重複部分を除いて追加
+                    merged_texts[-1] = prev_text + text[overlap_len:]
+                    overlap_found = True
+                    break
+            if overlap_found:
+                continue
+
+        merged_texts.append(text)
+
+    # テキストを結合
+    raw_text = ' '.join(merged_texts)
+
+    # 整形: 句読点で改行を追加
+    formatted_text = format_subtitle_text(raw_text)
+
+    return formatted_text
+
+def format_subtitle_text(text):
+    """字幕テキストを整形する（句読点で改行、余分な空白を除去）
+
+    Args:
+        text: 生の字幕テキスト
+
+    Returns:
+        str: 整形されたテキスト
+    """
+    # 余分な空白を正規化
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    # 日本語の句読点で改行
+    text = re.sub(r'。', '。\n', text)
+    text = re.sub(r'！', '！\n', text)
+    text = re.sub(r'？', '？\n', text)
+
+    # 英語の句読点で改行（文末のみ）
+    # ピリオドの後にスペースと大文字、または文末の場合
+    text = re.sub(r'\. ', '.\n', text)
+    text = re.sub(r'\! ', '!\n', text)
+    text = re.sub(r'\? ', '?\n', text)
+
+    # 連続する改行を1つに
+    text = re.sub(r'\n+', '\n', text)
+
+    # 各行の前後の空白を除去
+    lines = [line.strip() for line in text.split('\n')]
+    text = '\n'.join(line for line in lines if line)
+
+    return text
 
 def generate_detail_text(vtt_content, title):
     """VTTファイルから詳細テキストを生成"""
