@@ -103,29 +103,53 @@ def judge_good_time_split(text_lines,vtt_lines):
         mnt = int(m.group(2) or 0)
         s = int(m.group(3))
         return h * 3600 + mnt * 60 + s
-    
+
+    def format_time(sec):
+        """秒数を「X分Y秒」形式に変換"""
+        m, s = divmod(sec, 60)
+        h, m = divmod(m, 60)
+        if h:
+            return f"{h}時間{m}分{s}秒"
+        return f"{m}分{s}秒"
+
     all_time = []
+    time_and_headings = []  # 時間と見出しのペア
     for line in text_lines:
         # 時間情報を抽出
         match = re.search(r"(\d+)分(\d+)秒頃", line)
         if match:
-            all_time.append(parse_timestamp(line))
-            #print(all_time[-1],line)
+            ts = parse_timestamp(line)
+            all_time.append(ts)
+            time_and_headings.append((ts, line.strip()))
 
     vttsec = get_vtt_duration_in_seconds(vtt_lines)
 
+    if not all_time:
+        print('タイムスタンプが見つかりません。')
+        return False
+
     per = float(all_time[-1]) / float(vttsec)
 
-    #print(per,'vttsec:',vttsec,all_time[-1])
-    #print (all_time)
+    def print_time_headings():
+        """時間と見出しを表示"""
+        print(f"  動画の長さ: {format_time(vttsec)} ({vttsec}秒)")
+        print(f"  最後の見出し時間: {format_time(all_time[-1])} ({all_time[-1]}秒)")
+        print(f"  カバー率: {per*100:.1f}%")
+        print("  --- 見出し一覧 ---")
+        for ts, heading in time_and_headings:
+            # 見出しを短く表示（最大60文字）
+            short_heading = heading[:60] + "..." if len(heading) > 60 else heading
+            print(f"    {format_time(ts):>12} | {short_heading}")
 
     if len(all_time) != len(list(set(all_time))):
         print('時間が重複している行があります。')
+        print_time_headings()
         return False
     if per < 0.5:
         print('時間の分散が不均一です。')
+        print_time_headings()
         return False
-    
+
     return True
 
 def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, thumbnail_path=None):
@@ -142,8 +166,18 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, t
     "これは.vtt形式の字幕ファイルです。字幕の時刻を正確に解釈し、Markdownで要約してください。"
     "時間の読み取りミスは重大なので、タイムスタンプは必ず正確に処理してください。\n"
     "\n"
-    "各話題（セクション）には、その話題を代表するタイムスタンプを必ず1つ付けてください。"
-    "形式は「動画：*分*秒頃」とし、例として 00:16:27.182 は「動画：16分27秒頃」となります。\n"
+    "【重要】タイムスタンプのルール：\n"
+    "- 各見出しには、その話題が実際に話された時刻を**必ず1つだけ**付けてください。\n"
+    "- 形式は「動画：*分*秒頃」とし、例として 00:16:27.182 は「動画：16分27秒頃」となります。\n"
+    "- **絶対に複数の時間を書かないでください**（例：「0分55秒頃／11分10秒頃」は禁止）。\n"
+    "- **同じ時間を複数の見出しに使わないでください**。各見出しは固有の時間を持つ必要があります。\n"
+    "- 見出しの時間は**時系列順（昇順）**に並べてください。後の見出しが前の見出しより早い時間になってはいけません。\n"
+    "- 同じ時間帯に複数の話題がある場合は、1つの見出しに統合するか、数秒ずらして区別してください。\n"
+    "- 総括・まとめセクションも、その話題が話された時刻（通常は動画の終盤）を1つだけ記載してください。\n"
+    "\n"
+    "【目的】このタイムスタンプは、見出しごとに字幕を分割表示するために使用します。\n"
+    "各見出しの時間から次の見出しの時間までの字幕が、その見出しに紐づけられます。\n"
+    "そのため、時間が正確で、時系列順であることが非常に重要です。\n"
     "\n"
     "タイムスタンプは字幕の全発話に機械的に付けず、"
     "複数字幕をまとめた話題では、次の基準で最も代表的な時刻を1つ選んでください：\n"
