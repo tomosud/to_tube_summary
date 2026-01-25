@@ -533,9 +533,9 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
                     subtitle_text = get_subtitle_for_range(vtt_entries, ts_sec, next_sec)
                     if subtitle_text:
                         escaped_text = subtitle_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                        chatgpt_prompt = f"以下は字幕の一部です。省略を行わずに、読み易い日本語の文章として整理して。\n要約をしすぎないでインタビュー記事のように、会話のディティールを残した書き方で。\nただし、長すぎるときは短い見出しなどをつけて読み易く。\n---\n\n{subtitle_text}"
+                        chatgpt_prompt = f"以下は字幕の一部です。省略を行わずに、読み易い日本語の文章として整理して。\n要約をしすぎないでインタビュー記事のように、会話のディティールを残した書き方で。\nただし、長すぎるときは短い見出しなどをつけて読み易く。この指示への返答は不要なので、内容のみを出力して。\n---\n\n{subtitle_text}"
                         chatgpt_url = f"https://chatgpt.com/?temporary-chat=true&prompt={urllib.parse.quote(chatgpt_prompt, safe='')}"
-                        current["subtitle"] = f"<details class='subtitle-toggle'><summary>字幕 <a href=\"{chatgpt_url}\" target=\"_blank\" class=\"ai-summary-link\" onclick=\"event.stopPropagation()\">AIで要約</a></summary><div class='subtitle-content'>{escaped_text}</div></details>"
+                        current["subtitle"] = f"<details class='subtitle-toggle'><summary>字幕 <a href=\"{chatgpt_url}\" target=\"_blank\" class=\"ai-summary-link\" onclick=\"event.stopPropagation()\">AIで要約（{len(subtitle_text)}文字）</a></summary><div class='subtitle-content'>{escaped_text}</div></details>"
             continue
 
         # ----- タイムスタンプ単独行 ----- #
@@ -553,9 +553,9 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
                 subtitle_text = get_subtitle_for_range(vtt_entries, ts_sec_inline, next_sec)
                 if subtitle_text:
                     escaped_text = subtitle_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                    chatgpt_prompt = f"以下は字幕の一部です。省略を行わずに、読み易い日本語の文章として整理して。\n要約をしすぎないでインタビュー記事のように、会話のディティールを残した書き方で。\nただし、長すぎるときは短い見出しなどをつけて読み易く。\n---\n\n{subtitle_text}"
+                    chatgpt_prompt = f"以下は字幕の一部です。省略を行わずに、読み易い日本語の文章として整理して。\n要約をしすぎないでインタビュー記事のように、会話のディティールを残した書き方で。\nただし、長すぎるときは短い見出しなどをつけて読み易く。この指示への返答は不要なので、内容のみを出力して。\n---\n\n{subtitle_text}"
                     chatgpt_url = f"https://chatgpt.com/?temporary-chat=true&prompt={urllib.parse.quote(chatgpt_prompt, safe='')}"
-                    current["subtitle"] = f"<details class='subtitle-toggle'><summary>字幕 <a href=\"{chatgpt_url}\" target=\"_blank\" class=\"ai-summary-link\" onclick=\"event.stopPropagation()\">AIで要約</a></summary><div class='subtitle-content'>{escaped_text}</div></details>"
+                    current["subtitle"] = f"<details class='subtitle-toggle'><summary>字幕 <a href=\"{chatgpt_url}\" target=\"_blank\" class=\"ai-summary-link\" onclick=\"event.stopPropagation()\">AIで要約（{len(subtitle_text)}文字）</a></summary><div class='subtitle-content'>{escaped_text}</div></details>"
             continue
 
         # ----- リスト項目内のタイムスタンプ付き項目を見出し化 ----- #
@@ -588,9 +588,9 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
                     subtitle_text = get_subtitle_for_range(vtt_entries, ts_sec, next_sec)
                     if subtitle_text:
                         escaped_text = subtitle_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                        chatgpt_prompt = f"以下は字幕の一部です。省略を行わずに、読み易い日本語の文章として整理して。\n要約をしすぎないでインタビュー記事のように、会話のディティールを残した書き方で。\nただし、長すぎるときは短い見出しなどをつけて読み易く。\n---\n\n{subtitle_text}"
+                        chatgpt_prompt = f"以下は字幕の一部です。省略を行わずに、読み易い日本語の文章として整理して。\n要約をしすぎないでインタビュー記事のように、会話のディティールを残した書き方で。\nただし、長すぎるときは短い見出しなどをつけて読み易く。この指示への返答は不要なので、内容のみを出力して。\n---\n\n{subtitle_text}"
                         chatgpt_url = f"https://chatgpt.com/?temporary-chat=true&prompt={urllib.parse.quote(chatgpt_prompt, safe='')}"
-                        current["subtitle"] = f"<details class='subtitle-toggle'><summary>字幕 <a href=\"{chatgpt_url}\" target=\"_blank\" class=\"ai-summary-link\" onclick=\"event.stopPropagation()\">AIで要約</a></summary><div class='subtitle-content'>{escaped_text}</div></details>"
+                        current["subtitle"] = f"<details class='subtitle-toggle'><summary>字幕 <a href=\"{chatgpt_url}\" target=\"_blank\" class=\"ai-summary-link\" onclick=\"event.stopPropagation()\">AIで要約（{len(subtitle_text)}文字）</a></summary><div class='subtitle-content'>{escaped_text}</div></details>"
 
             # 本文があれば追加
             if body_text:
