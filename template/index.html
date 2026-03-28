@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="template-version" content="4">
+<style>
+body{font-family:sans-serif;line-height:1.7em;padding:1em;background:#121212;color:#fff}
+h1,h2,h3,h4{color:#ff9800;border-bottom:1px solid #333;padding-bottom:.3em;margin-top:1.5em}
+ul{margin-left:1.5em}
+li{margin-bottom:.3em}
+p{margin-top:.8em}
+a{color:#4fc3f7;text-decoration:none}
+.timestamp-section{margin:1.5em 0}
+.timestamp-images{display:grid;grid-template-columns:repeat(6,1fr);gap:16px;margin-top:.8em}
+.thumb-container{position:relative;width:100%;aspect-ratio:16/9;transition:transform 0.2s;display:block}
+.thumb-container:hover{transform:scale(1.8);z-index:100}
+.thumb-img{width:100%;height:100%;object-fit:cover;border-radius:4px;cursor:pointer}
+.thumb-container::after{content:'▶';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,255,255,0.4);font-size:24px;background:rgba(0,0,0,0.4);padding:6px 14px;border-radius:50%;pointer-events:none}
+.jump-link{background:#333;padding:10px;margin:10px 0;border-radius:5px;text-align:center}
+.detail-section{border-top:2px solid #666;margin-top:2em;padding-top:2em}
+.video-thumbnail{max-width:640px;width:100%;border-radius:8px;margin:1em 0;box-shadow:0 4px 8px rgba(0,0,0,.3)}
+details.subtitle-toggle{margin:1em 0;background:#1e1e1e;border-radius:6px;border:1px solid #333}
+details.subtitle-toggle summary{cursor:pointer;padding:8px 12px;color:#aaa;font-size:0.9em;user-select:none}
+details.subtitle-toggle summary:hover{color:#fff;background:#2a2a2a}
+details.subtitle-toggle[open] summary{border-bottom:1px solid #333}
+.subtitle-content{padding:12px 16px;color:#ccc;font-size:0.9em;line-height:1.8em;white-space:pre-wrap;max-height:400px;overflow-y:auto}
+.ai-summary-link{margin-left:1em;color:#4fc3f7;font-size:0.85em;padding:2px 8px;background:#2a2a2a;border-radius:4px}
+.ai-summary-link:hover{background:#3a3a3a;color:#fff}
+</style>
+<script src="data.js"></script>
+</head>
+<body>
+<script>
+(function() {
+  // --- CONFIG: 表示側で加工する設定 ---
+  var CONFIG = {
+    proxyDomain: 'www.yout-ube.com',
+    embedParams: 'autoplay=1&mute=1'
+  };
+
+  // --- ユーティリティ ---
+  function escapeHtml(text) {
+    var d = document.createElement('div');
+    d.appendChild(document.createTextNode(text));
+    return d.innerHTML;
+  }
+
+  function makeProxyUrl(url) {
+    if (!url) return '';
+    return url.replace('www.youtube.com/', CONFIG.proxyDomain + '/');
+  }
+
+  function makeVideoLink(url, timestampSec) {
+    if (!url) return '';
+    var proxyUrl = makeProxyUrl(url);
+    // &t= が末尾にある場合はそのまま秒数を付ける
+    if (proxyUrl.indexOf('&t=') !== -1) {
+      // 既に &t= がある場合、末尾の値を置き換え
+      return proxyUrl.replace(/&t=.*$/, '&t=' + timestampSec);
+    }
+    return proxyUrl + (proxyUrl.indexOf('?') !== -1 ? '&' : '?') + 't=' + timestampSec;
+  }
+
+  function makeEmbedUrl(videoId, timestampSec) {
+    return 'https://www.youtube-nocookie.com/embed/' + videoId + '?start=' + timestampSec + '&autoplay=1&mute=1';
+  }
+
+  function extractVideoId(url) {
+    if (!url) return '';
+    var m = url.match(/[?&]v=([a-zA-Z0-9_-]+)/);
+    return m ? m[1] : '';
+  }
+
+  function formatTimestamp(sec) {
+    if (sec == null) return '';
+    var h = Math.floor(sec / 3600);
+    var rem = sec % 3600;
+    var m = Math.floor(rem / 60);
+    var s = rem % 60;
+    var pad = s < 10 ? '0' : '';
+    if (h) return h + '時間' + m + '分' + pad + s + '秒頃';
+    return m + '分' + pad + s + '秒頃';
+  }
+
+  function makeChatGptUrl(subtitleText) {
+    var prompt = '以下は字幕の一部です。省略を行わずに、読み易い日本語の文章として整理して。\n' +
+      '要約をしすぎないで、会話のディティールを残した書き方で。\n' +
+      'ただし、長すぎるときは短い見出しなどをつけて読み易く。この指示への返答は不要なので、内容のみを出力して。\n' +
+      '---\n\n' + subtitleText;
+    return 'https://chatgpt.com/?temporary-chat=true&prompt=' + encodeURIComponent(prompt);
+  }
+
+  // --- データのデフォルト値を補完 ---
+  var data = (typeof PAGE_DATA !== 'undefined') ? PAGE_DATA : {};
+  if (!data.schema_version) data.schema_version = 1;
+  if (!data.sections) data.sections = [];
+  if (!data.video_id) data.video_id = extractVideoId(data.url || '');
+  if (!data.thumbnail) data.thumbnail = 'Thumbnail.jpg';
+
+  var videoId = data.video_id;
+  var baseUrl = data.url || '';
+
+  // --- サムネイル ---
+  if (data.thumbnail) {
+    var thumb = document.createElement('img');
+    thumb.src = data.thumbnail;
+    thumb.className = 'video-thumbnail';
+    thumb.alt = 'Video Thumbnail';
+    thumb.onerror = function() { this.style.display = 'none'; };
+    document.body.appendChild(thumb);
+  }
+
+  // --- 詳細へのジャンプリンク ---
+  if (data.detail) {
+    var jumpDiv = document.createElement('div');
+    jumpDiv.className = 'jump-link';
+    jumpDiv.innerHTML = "<a href='#detail-section'>📄 詳細に飛ぶ</a>";
+    document.body.appendChild(jumpDiv);
+  }
+
+  // --- セクション描画 ---
+  for (var i = 0; i < data.sections.length; i++) {
+    var sec = data.sections[i];
+    var sectionDiv = document.createElement('div');
+    sectionDiv.className = 'timestamp-section';
+
+    // 見出し
+    if (sec.heading) {
+      var level = sec.level || 2;
+      if (level < 1) level = 1;
+      if (level > 4) level = 4;
+      var h = document.createElement('h' + level);
+      h.textContent = sec.heading;
+      sectionDiv.appendChild(h);
+    }
+
+    // 本文 (HTML変換済み)
+    if (sec.body) {
+      var bodyDiv = document.createElement('div');
+      bodyDiv.innerHTML = sec.body;
+      sectionDiv.appendChild(bodyDiv);
+    }
+
+    // 画像グリッド
+    if (sec.images && sec.images.length > 0) {
+      var gridDiv = document.createElement('div');
+      gridDiv.className = 'timestamp-images';
+      for (var j = 0; j < sec.images.length; j++) {
+        var img = sec.images[j];
+        var startSec = Math.floor(img.start);
+        var clickUrl = makeVideoLink(baseUrl, startSec);
+
+        var link = document.createElement('a');
+        link.className = 'thumb-container';
+        link.href = clickUrl;
+        link.target = '_blank';
+
+        var thumbImg = document.createElement('img');
+        thumbImg.className = 'thumb-img';
+        thumbImg.src = img.src;
+        thumbImg.loading = 'lazy';
+
+        link.appendChild(thumbImg);
+        gridDiv.appendChild(link);
+      }
+      sectionDiv.appendChild(gridDiv);
+    }
+
+    // 動画リンク
+    if (sec.timestamp != null) {
+      var linkP = document.createElement('p');
+      var linkA = document.createElement('a');
+      linkA.href = makeVideoLink(baseUrl, sec.timestamp);
+      linkA.target = '_blank';
+      linkA.textContent = '▶ 動画：' + formatTimestamp(sec.timestamp);
+      linkP.appendChild(linkA);
+      sectionDiv.appendChild(linkP);
+    }
+
+    // 字幕トグル
+    if (sec.subtitle) {
+      var details = document.createElement('details');
+      details.className = 'subtitle-toggle';
+      var summary = document.createElement('summary');
+      summary.textContent = '字幕 ';
+      var aiLink = document.createElement('a');
+      aiLink.href = makeChatGptUrl(sec.subtitle);
+      aiLink.target = '_blank';
+      aiLink.className = 'ai-summary-link';
+      aiLink.textContent = 'AIで要約（' + sec.subtitle.length + '文字）';
+      aiLink.onclick = function(e) { e.stopPropagation(); };
+      summary.appendChild(aiLink);
+      details.appendChild(summary);
+      var contentDiv = document.createElement('div');
+      contentDiv.className = 'subtitle-content';
+      contentDiv.textContent = sec.subtitle;
+      details.appendChild(contentDiv);
+      sectionDiv.appendChild(details);
+    }
+
+    document.body.appendChild(sectionDiv);
+  }
+
+  // --- 詳細セクション ---
+  if (data.detail) {
+    var detailDiv = document.createElement('div');
+    detailDiv.id = 'detail-section';
+    detailDiv.className = 'detail-section';
+    detailDiv.innerHTML = '<h2>📄 詳細内容</h2>' + data.detail;
+    document.body.appendChild(detailDiv);
+  }
+
+  // --- makeEmbedUrl は不要になったが互換性のため残す ---
+})();
+</script>
+</body>
+</html>

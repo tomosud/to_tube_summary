@@ -1,9 +1,18 @@
 import os
 import re
+import json
+import shutil
+import glob
 import urllib.parse
 from openai import OpenAI
 import tkinter as tk
 from tkinter import simpledialog
+
+# テンプレートのバージョン（template/index.html の <meta name="template-version"> と一致させる）
+TEMPLATE_VERSION = 4
+# テンプレートファイルのパス
+TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template')
+TEMPLATE_HTML = os.path.join(TEMPLATE_DIR, 'index.html')
 
 def get_api_key():
     """APIキーを取得または設定する"""
@@ -413,35 +422,15 @@ def markdown_to_html(text):
     return '\n'.join(html_lines)
 
 def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_text=None, thumbnail_path=None, vtt_entries=None):
-    """Markdown ライクなテキストを HTML に変換（バグフィックス版）
+    """Markdown ライクなテキストを data.js + index.html に変換
 
-    - 見出し / 本文 → 画像 → リンク の順序を保証
-    - タイムスタンプ表記は
-        * 3時間4分5秒頃
-        * 10分5秒頃
-        * 5秒頃         ← 分が省略されている場合は 0分と解釈
-    - **…** を正しく <b>…</b> に変換（\1 が残るバグ修正）
-    - 中身の無いリスト項目（例: "* **"）を無視
-    - 末尾で元テキストを .txt としても保存
-    - thumbnail_path: サムネイル画像のパス（タイトル下に表示）
-    - vtt_entries: parse_vtt_with_timestamps()の戻り値（展開可能な字幕表示用）
+    従来のモノリシックHTML生成の代わりに:
+    - data.js: 動画固有のデータ（セクション、画像パス、字幕テキスト等）
+    - index.html: 汎用テンプレート（template/index.htmlのコピー）
+    を出力する。プロキシURL等の加工はテンプレート側で行う。
     """
 
-    # ---------------------- HTML テンプレート ---------------------- #
-    html_lines = get_html_header()
-
-    # ---------------------- サムネイル画像をページ最上部に表示 ---------------------- #
-    if thumbnail_path and os.path.exists(thumbnail_path):
-        rel = os.path.relpath(thumbnail_path, os.path.dirname(output_html_path)).replace('\\', '/')
-        html_lines.append(f'<img src="{rel}" class="video-thumbnail" alt="Video Thumbnail">')
-
-    # 詳細セクションへのジャンプリンクを追加（詳細テキストがある場合のみ）
-    if detail_text:
-        html_lines.extend([
-            "<div class='jump-link'>",
-            "<a href='#detail-section'>📄 詳細に飛ぶ</a>",
-            "</div>"
-        ])
+    output_dir = os.path.dirname(output_html_path)
 
     # ---------------------- 正規表現 ---------------------- #
     ts_pattern = re.compile(r"(?:([0-9]+)時間)?(?:([0-9]+)分)?([0-9]+)秒頃")
@@ -455,57 +444,58 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
         s = int(m.group(3))
         return h * 3600 + mnt * 60 + s
 
-    def format_timestamp(sec: int):
-        h, rem = divmod(sec, 3600)
-        mnt, s = divmod(rem, 60)
-        if h:
-            return f"{h}時間{mnt}分{s:02d}秒頃"
-        return f"{mnt}分{s:02d}秒頃"
+    def build_image_data(match_list):
+        """画像マッチ結果を data.js 用の辞書リストに変換"""
+        result = []
+        for path, img_start, img_end in match_list:
+            rel = os.path.relpath(path, output_dir).replace('\\', '/')
+            result.append({"src": rel, "start": img_start, "end": img_end})
+        return result
 
-    def build_image_block(match_list):
-        buf = ["<div class='timestamp-images'>"]
-        for path, img_start, _ in match_list:
-            rel = os.path.relpath(path, os.path.dirname(output_html_path)).replace('\\', '/')
-            start_sec = int(img_start)
-            # urlbaseからvideo_idを抽出（例: https://www.youtube-nocookie.com/watch?v=7D0nWcBQyFE&t= → 7D0nWcBQyFE）
-            video_id_match = re.search(r'[?&]v=([a-zA-Z0-9_-]+)', urlbase)
-            video_id = video_id_match.group(1) if video_id_match else ''
-            embed_url = f"https://www.yout-ube.com/watch?v={video_id}&t={start_sec}&autoplay=1&mute=1"
-            click_url = f"{urlbase}{start_sec}"
-            buf.append(
-                f'<div class="thumb-container">'
-                f'<iframe class="video-preview" src="" data-src="{embed_url}" allow="autoplay; encrypted-media; accelerometer; gyroscope; picture-in-picture" allowfullscreen></iframe>'
-                f'<div class="thumb-overlay" style="background-image:url(\'{rel}\')" data-click-url="{click_url}" title="クリックして再生 / Ctrl+クリックで動画ページを開く"></div>'
-                f'</div>'
-            )
-        buf.append("</div>")
-        return "\n".join(buf)
+    # ---------------------- urlbase から video_id を抽出 ---------------------- #
+    video_id_match = re.search(r'[?&]v=([a-zA-Z0-9_-]+)', urlbase)
+    video_id = video_id_match.group(1) if video_id_match else ''
+
+    # ---------------------- サムネイルの相対パス ---------------------- #
+    thumbnail_rel = None
+    if thumbnail_path and os.path.exists(thumbnail_path):
+        thumbnail_rel = os.path.relpath(thumbnail_path, output_dir).replace('\\', '/')
 
     # ---------------------- 全タイムスタンプを収集 ---------------------- #
     timestamps = [(idx, parse_timestamp(raw)) for idx, raw in enumerate(lines) if parse_timestamp(raw) is not None]
 
     # ---------------------- セクションバッファ ---------------------- #
-    current = {"heading": "", "body": [], "images": "", "link": "", "subtitle": ""}
+    sections = []
+    current = {"heading": "", "heading_text": "", "level": 2, "body": [], "images": [], "timestamp": None, "subtitle": None}
 
     def flush():
         nonlocal current
-        if not any(current.values()):
+        if not current["heading_text"] and not current["body"]:
             return
-        html_lines.append("<div class='timestamp-section'>")
-        if current["heading"]:
-            html_lines.append(current["heading"])
-        if current["body"]:
-            html_lines.extend(current["body"])
-        if current["images"]:
-            html_lines.append(current["images"])
-        if current["link"]:
-            html_lines.append(current["link"])
-        if current["subtitle"]:
-            html_lines.append(current["subtitle"])
-        html_lines.append("</div>")
-        current = {"heading": "", "body": [], "images": "", "link": "", "subtitle": ""}
+        sections.append({
+            "heading": current["heading_text"],
+            "level": current["level"],
+            "body": "\n".join(current["body"]) if current["body"] else "",
+            "images": current["images"],
+            "timestamp": current["timestamp"],
+            "subtitle": current["subtitle"],
+        })
+        current = {"heading": "", "heading_text": "", "level": 2, "body": [], "images": [], "timestamp": None, "subtitle": None}
 
     in_list = False
+
+    def add_timestamp_data(ts_sec, idx):
+        """タイムスタンプに関連する画像と字幕をcurrentに設定"""
+        next_sec = next((sec for i2, sec in timestamps if i2 > idx), None)
+        if images:
+            imgs = find_matching_images(ts_sec, next_sec, images)
+            if imgs:
+                current["images"] = build_image_data(imgs)
+        current["timestamp"] = ts_sec
+        if vtt_entries:
+            subtitle_text = get_subtitle_for_range(vtt_entries, ts_sec, next_sec)
+            if subtitle_text:
+                current["subtitle"] = subtitle_text
 
     # ---------------------- メインループ ---------------------- #
     for idx, raw in enumerate(lines):
@@ -516,102 +506,61 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
         # ----- 見出し ----- #
         m_h = re.match(r'^(#{1,4})\s*(.+)$', line)
         if m_h:
+            if in_list:
+                current["body"].append("</ul>")
+                in_list = False
             flush()
             level = min(len(m_h.group(1)), 4)
             heading_text = m_h.group(2).strip()
-            current["heading"] = f"<h{level}>{heading_text}</h{level}>"
+            current["heading_text"] = heading_text
+            current["level"] = level
             ts_sec = parse_timestamp(heading_text)
             if ts_sec is not None:
-                next_sec = next((sec for i2, sec in timestamps if i2 > idx), None)
-                if images:
-                    imgs = find_matching_images(ts_sec, next_sec, images)
-                    if imgs:
-                        current["images"] = build_image_block(imgs)
-                current["link"] = f'<p><a href="{urlbase}{ts_sec}" target="_blank">▶ 動画：{format_timestamp(ts_sec)}</a></p>'
-                # 展開可能な字幕を追加
-                if vtt_entries:
-                    subtitle_text = get_subtitle_for_range(vtt_entries, ts_sec, next_sec)
-                    if subtitle_text:
-                        escaped_text = subtitle_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                        chatgpt_prompt = f"以下は字幕の一部です。省略を行わずに、読み易い日本語の文章として整理して。\n要約をしすぎないで、会話のディティールを残した書き方で。\nただし、長すぎるときは短い見出しなどをつけて読み易く。この指示への返答は不要なので、内容のみを出力して。\n---\n\n{subtitle_text}"
-                        chatgpt_url = f"https://chatgpt.com/?temporary-chat=true&prompt={urllib.parse.quote(chatgpt_prompt, safe='')}"
-                        current["subtitle"] = f"<details class='subtitle-toggle'><summary>字幕 <a href=\"{chatgpt_url}\" target=\"_blank\" class=\"ai-summary-link\" onclick=\"event.stopPropagation()\">AIで要約（{len(subtitle_text)}文字）</a></summary><div class='subtitle-content'>{escaped_text}</div></details>"
+                add_timestamp_data(ts_sec, idx)
             continue
 
         # ----- タイムスタンプ単独行 ----- #
         ts_sec_inline = parse_timestamp(line)
         ts_only_line = bool(re.fullmatch(r"(?:動画[:：]?\s*)?(?:[0-9]+時間)?(?:[0-9]+分)?[0-9]+秒頃", line))
         if ts_only_line and ts_sec_inline is not None:
-            next_sec = next((sec for i2, sec in timestamps if i2 > idx), None)
-            if images:
-                imgs = find_matching_images(ts_sec_inline, next_sec, images)
-                if imgs:
-                    current["images"] = build_image_block(imgs)
-            current["link"] = f'<p><a href="{urlbase}{ts_sec_inline}" target="_blank">▶ 動画：{format_timestamp(ts_sec_inline)}</a></p>'
-            # 展開可能な字幕を追加
-            if vtt_entries:
-                subtitle_text = get_subtitle_for_range(vtt_entries, ts_sec_inline, next_sec)
-                if subtitle_text:
-                    escaped_text = subtitle_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                    chatgpt_prompt = f"以下は字幕の一部です。省略を行わずに、読み易い日本語の文章として整理して。\n要約をしすぎないでインタビュー記事のように、会話のディティールを残した書き方で。\nただし、長すぎるときは短い見出しなどをつけて読み易く。この指示への返答は不要なので、内容のみを出力して。\n---\n\n{subtitle_text}"
-                    chatgpt_url = f"https://chatgpt.com/?temporary-chat=true&prompt={urllib.parse.quote(chatgpt_prompt, safe='')}"
-                    current["subtitle"] = f"<details class='subtitle-toggle'><summary>字幕 <a href=\"{chatgpt_url}\" target=\"_blank\" class=\"ai-summary-link\" onclick=\"event.stopPropagation()\">AIで要約（{len(subtitle_text)}文字）</a></summary><div class='subtitle-content'>{escaped_text}</div></details>"
+            add_timestamp_data(ts_sec_inline, idx)
             continue
 
         # ----- リスト項目内のタイムスタンプ付き項目を見出し化 ----- #
-        # パターン: "1. **タイトル（動画：6分11秒頃）**: 本文"
-        # または: "* **タイトル（動画：6分11秒頃）**"
-        # または: "- **タイトル（動画：6分11秒頃）**: 本文"
         list_item_match = re.match(
             r'^[\s*\-0-9.]+\*\*([^*]+（動画[:：]?\s*(?:[0-9]+時間)?(?:[0-9]+分)?[0-9]+秒頃）)\*\*(?:[:：]?\s*(.*))?$',
             line
         )
         if list_item_match:
+            if in_list:
+                current["body"].append("</ul>")
+                in_list = False
             flush()
             heading_text = list_item_match.group(1).strip()
             body_text = list_item_match.group(2).strip() if list_item_match.group(2) else None
 
-            # 小見出しとして処理（h4レベル）
-            current["heading"] = f"<h4>{heading_text}</h4>"
+            current["heading_text"] = heading_text
+            current["level"] = 4
 
-            # タイムスタンプを抽出して画像とリンクを生成
             ts_sec = parse_timestamp(heading_text)
             if ts_sec is not None:
-                next_sec = next((sec for i2, sec in timestamps if i2 > idx), None)
-                if images:
-                    imgs = find_matching_images(ts_sec, next_sec, images)
-                    if imgs:
-                        current["images"] = build_image_block(imgs)
-                current["link"] = f'<p><a href="{urlbase}{ts_sec}" target="_blank">▶ 動画：{format_timestamp(ts_sec)}</a></p>'
-                # 展開可能な字幕を追加
-                if vtt_entries:
-                    subtitle_text = get_subtitle_for_range(vtt_entries, ts_sec, next_sec)
-                    if subtitle_text:
-                        escaped_text = subtitle_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                        chatgpt_prompt = f"以下は字幕の一部です。省略を行わずに、読み易い日本語の文章として整理して。\n要約をしすぎないでインタビュー記事のように、会話のディティールを残した書き方で。\nただし、長すぎるときは短い見出しなどをつけて読み易く。この指示への返答は不要なので、内容のみを出力して。\n---\n\n{subtitle_text}"
-                        chatgpt_url = f"https://chatgpt.com/?temporary-chat=true&prompt={urllib.parse.quote(chatgpt_prompt, safe='')}"
-                        current["subtitle"] = f"<details class='subtitle-toggle'><summary>字幕 <a href=\"{chatgpt_url}\" target=\"_blank\" class=\"ai-summary-link\" onclick=\"event.stopPropagation()\">AIで要約（{len(subtitle_text)}文字）</a></summary><div class='subtitle-content'>{escaped_text}</div></details>"
+                add_timestamp_data(ts_sec, idx)
 
-            # 本文があれば追加
             if body_text:
                 body_html = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", body_text)
                 body_html = re.sub(r"\*\*", "", body_html)
                 current["body"].append(f"<p>{body_html}</p>")
-
             continue
 
         # ----- 本文 / リスト ----- #
         if line.lstrip().startswith("*"):
-            # リスト項目
             if not in_list:
                 current["body"].append("<ul>")
                 in_list = True
             item_raw = line.lstrip("* ")
-            # スキップ: 空 or "**" のみ
             if re.fullmatch(r"\*\*\s*\*\*", item_raw.strip()):
                 continue
             item_html = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", item_raw)
-            # 対応しない単独の**を除去
             item_html = re.sub(r"\*\*", "", item_html)
             current["body"].append(f"<li>{item_html}</li>")
         else:
@@ -622,7 +571,6 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
                 current["body"].append(f'<p><a href="{line}" target="_blank">{line}</a></p>')
             else:
                 replaced = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", line)
-                # 対応しない単独の**を除去
                 replaced = re.sub(r"\*\*", "", replaced)
                 current["body"].append(f"<p>{replaced}</p>")
 
@@ -630,43 +578,33 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
         current["body"].append("</ul>")
     flush()
 
-    # ---------------------- 詳細セクション追加 ---------------------- #
-    if detail_text:
-        html_lines.extend([
-            "<div id='detail-section' class='detail-section'>",
-            "<h2>📄 詳細内容</h2>",
-            markdown_to_html(detail_text),
-            "</div>"
-        ])
+    # ---------------------- PAGE_DATA を構築 ---------------------- #
+    page_data = {
+        "schema_version": 1,
+        "video_id": video_id,
+        "url": urlbase,
+        "thumbnail": thumbnail_rel,
+        "sections": sections,
+        "detail": markdown_to_html(detail_text) if detail_text else None,
+    }
 
-    # ---------------------- JavaScript for click to load iframe ---------------------- #
-    html_lines.extend([
-        "<script>",
-        "document.querySelectorAll('.thumb-container').forEach(container => {",
-        "  const overlay = container.querySelector('.thumb-overlay');",
-        "  const iframe = container.querySelector('.video-preview');",
-        "  overlay.addEventListener('click', () => {",
-        "    iframe.src = iframe.dataset.src;",
-        "    iframe.classList.add('active');",
-        "    overlay.classList.add('hidden');",
-        "  });",
-        "  container.addEventListener('mouseleave', () => {",
-        "    iframe.src = '';",
-        "    iframe.classList.remove('active');",
-        "    overlay.classList.remove('hidden');",
-        "  });",
-        "});",
-        "</script>"
-    ])
+    # ---------------------- data.js を書き出し ---------------------- #
+    data_js_path = os.path.join(output_dir, 'data.js')
+    with open(data_js_path, "w", encoding="utf-8") as fp:
+        fp.write("var PAGE_DATA = ")
+        json.dump(page_data, fp, ensure_ascii=False, indent=2)
+        fp.write(";\n")
+    print(f"✅ data.js 作成: {data_js_path}")
 
-    # ---------------------- クローズ & テキスト保存 ---------------------- #
-    html_lines.append("</body></html>")
-    with open(output_html_path, "w", encoding="utf-8") as fp:
-        fp.write("\n".join(html_lines))
-    print(f"✅ HTML 作成: {output_html_path}")
+    # ---------------------- テンプレート index.html をコピー ---------------------- #
+    index_html_path = os.path.join(output_dir, 'index.html')
+    shutil.copy2(TEMPLATE_HTML, index_html_path)
+    print(f"✅ index.html コピー: {index_html_path}")
 
-    with open(output_html_path + '.txt', "w", encoding="utf-8") as fp:
+    # ---------------------- テキスト保存（従来互換） ---------------------- #
+    with open(os.path.join(output_dir, 'index.html.txt'), "w", encoding="utf-8") as fp:
         fp.write("\n".join(lines))
+    print(f"✅ テキスト保存: index.html.txt")
 
 
 def read_vtt(vtt):
@@ -856,22 +794,20 @@ def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=Fal
         thumbnail_path: サムネイル画像のパス（オプション）
 
     Returns:
-        str: 生成されたHTMLファイルのパス
+        str: 生成されたHTMLファイルのパス（index.html）
     """
     # パスの正規化
     vtt = vtt_path.replace('\\','/')
     title = video_title
     
-    # HTMLファイルのパスを設定
-    html_path = os.path.join(output_dir, os.path.splitext(os.path.basename(vtt))[0] + '.html')
+    # HTMLファイルのパスを設定（index.html に統一）
+    html_path = os.path.join(output_dir, 'index.html')
     
     # URLをグローバル変数に設定（要約時に使用）
+    # 注: プロキシURL変換はテンプレート側で行うため、正規URLのまま保持
     global url_base
     if url:
         url_base = url
-
-    #no cokkieのため、URLを変換
-    url_base = url_base.replace('www.youtube.com/', 'www.yout-ube.com/')
     
     # 詳細テキストを生成（詳細モードの場合のみ）
     detail_text = None
@@ -885,11 +821,210 @@ def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=Fal
     # トークン使用量サマリーを表示
     print_token_summary()
 
+    # 出力フォルダ全体のテンプレートを自動更新
+    base_dir = os.path.dirname(output_dir)
+    update_templates(base_dir)
+
     return html_path
+
+
+# ====================== テンプレート自動更新 ====================== #
+
+def get_template_version_from_html(html_path):
+    """HTMLファイルからテンプレートバージョンを読み取る"""
+    try:
+        with open(html_path, 'r', encoding='utf-8') as f:
+            content = f.read(2048)  # 先頭部分だけ読む
+        m = re.search(r'<meta\s+name=["\']template-version["\']\s+content=["\'](\d+)["\']', content)
+        if m:
+            return int(m.group(1))
+    except Exception:
+        pass
+    return None
+
+
+def update_templates(base_dir):
+    """base_dir 以下の全フォルダの index.html テンプレートを最新版に更新する。
+    data.js が存在するフォルダのみ対象（新フォーマット済み）。
+    """
+    if not os.path.isdir(base_dir):
+        return
+
+    updated = 0
+    for folder_name in os.listdir(base_dir):
+        folder_path = os.path.join(base_dir, folder_name)
+        if not os.path.isdir(folder_path):
+            continue
+        data_js = os.path.join(folder_path, 'data.js')
+        index_html = os.path.join(folder_path, 'index.html')
+        if not os.path.exists(data_js):
+            continue  # 旧フォーマット or 無関係フォルダ → スキップ
+        ver = get_template_version_from_html(index_html)
+        if ver is None or ver < TEMPLATE_VERSION:
+            shutil.copy2(TEMPLATE_HTML, index_html)
+            updated += 1
+
+    if updated:
+        print(f"🔄 テンプレート更新: {updated} フォルダの index.html を v{TEMPLATE_VERSION} に更新しました")
+
+
+# ====================== 既存データ移行 ====================== #
+
+def migrate_legacy_html(base_dir):
+    """base_dir 以下の旧フォーマット（モノリシックHTML）フォルダを
+    data.js + index.html 形式に変換する。
+
+    対象: data.js が存在せず、.html.txt（生テキスト）が存在するフォルダ
+    """
+    if not os.path.isdir(base_dir):
+        print(f"⚠️ ディレクトリが存在しません: {base_dir}")
+        return
+
+    migrated = 0
+    skipped = 0
+
+    for folder_name in os.listdir(base_dir):
+        folder_path = os.path.join(base_dir, folder_name)
+        if not os.path.isdir(folder_path):
+            continue
+
+        # 既に新フォーマットなら skip
+        if os.path.exists(os.path.join(folder_path, 'data.js')):
+            continue
+
+        # .html.txt を探す
+        txt_files = glob.glob(os.path.join(folder_path, '*.html.txt'))
+        if not txt_files:
+            continue
+
+        txt_file = txt_files[0]
+        print(f"\n--- 移行中: {folder_name} ---")
+
+        try:
+            # 1. 生テキスト読み込み
+            with open(txt_file, 'r', encoding='utf-8') as f:
+                raw_lines = f.read().split('\n')
+
+            # 2. info.json から video_id, url を取得
+            info_path = os.path.join(folder_path, 'info.json')
+            video_id = ''
+            url = ''
+            if os.path.exists(info_path):
+                with open(info_path, 'r', encoding='utf-8') as f:
+                    info = json.load(f)
+                video_id = info.get('video_id', '')
+                url = info.get('url', '')
+            
+            # URL が無い場合、video_id からURLを推定
+            if not url and video_id:
+                url = f"https://www.youtube.com/watch?v={video_id}&t="
+
+            # 3. images/ から画像リストを構築
+            images = []
+            images_dir = os.path.join(folder_path, 'images')
+            if os.path.isdir(images_dir):
+                img_pattern = re.compile(r'_t(\d+)_to_(\d+)_')
+                for img_file in os.listdir(images_dir):
+                    if img_file.endswith('.jpg') and '_t' in img_file and '_to_' in img_file:
+                        m = img_pattern.search(img_file)
+                        if m:
+                            # タイムスタンプ文字列をパース (HHMMSS000 形式)
+                            start_str = m.group(1)
+                            end_str = m.group(2)
+                            start_sec = _parse_timestamp_str(start_str)
+                            end_sec = _parse_timestamp_str(end_str)
+                            if start_sec is not None and end_sec is not None:
+                                filepath = os.path.join(images_dir, img_file)
+                                images.append((filepath, start_sec, end_sec))
+                images.sort(key=lambda x: x[1])
+
+            # 4. VTTファイルから字幕データを取得
+            vtt_entries = None
+            vtt_files = glob.glob(os.path.join(folder_path, '*.vtt'))
+            if vtt_files:
+                vtt_content = read_vtt(vtt_files[0])
+                vtt_entries = parse_vtt_with_timestamps(vtt_content)
+
+            # 5. 旧HTMLから詳細セクションを取得（あれば）
+            detail_text = _extract_detail_from_legacy_html(folder_path)
+
+            # 6. data.js 生成（txt_to_html を呼ぶ）
+            dummy_html_path = os.path.join(folder_path, 'index.html')
+            txt_to_html(raw_lines, dummy_html_path, url, images or None, detail_text, 
+                       os.path.join(folder_path, 'Thumbnail.jpg') if os.path.exists(os.path.join(folder_path, 'Thumbnail.jpg')) else None,
+                       vtt_entries)
+
+            # 7. 旧HTMLを .html.bak にリネーム
+            for html_file in glob.glob(os.path.join(folder_path, '*.html')):
+                basename = os.path.basename(html_file)
+                if basename != 'index.html':
+                    bak_path = html_file + '.bak'
+                    os.rename(html_file, bak_path)
+                    print(f"  旧HTML退避: {basename} → {basename}.bak")
+
+            # 8. 旧 .html.txt を index.html.txt にリネーム（既にあれば不要）
+            index_txt = os.path.join(folder_path, 'index.html.txt')
+            if txt_file != index_txt and os.path.exists(txt_file):
+                if not os.path.exists(index_txt):
+                    shutil.copy2(txt_file, index_txt)
+
+            migrated += 1
+            print(f"  ✅ 移行完了")
+
+        except Exception as e:
+            print(f"  ⚠️ 移行失敗: {e}")
+            skipped += 1
+
+    print(f"\n=== 移行結果 ===")
+    print(f"移行成功: {migrated} フォルダ")
+    if skipped:
+        print(f"移行失敗: {skipped} フォルダ")
+
+
+def _parse_timestamp_str(ts_str):
+    """画像ファイル名のタイムスタンプ文字列 (HHMMSSSSS = HH:MM:SS + mmm連結) を秒数に変換
+    
+    例: 000001966 → 00:00:01.966 → 1.966秒
+        000130000 → 00:01:30.000 → 90秒
+    """
+    original = ts_str.zfill(9)  # 常に9桁にパディング
+    h = int(original[0:2])
+    m = int(original[2:4])
+    s = int(original[4:6])
+    ms = int(original[6:9])
+    return h * 3600 + m * 60 + s + ms / 1000.0
+
+
+def _extract_detail_from_legacy_html(folder_path):
+    """旧HTMLから詳細セクションのテキストを抽出する（ベストエフォート）"""
+    html_files = [f for f in glob.glob(os.path.join(folder_path, '*.html')) 
+                  if os.path.basename(f) != 'index.html']
+    if not html_files:
+        return None
+    
+    try:
+        with open(html_files[0], 'r', encoding='utf-8') as f:
+            content = f.read()
+        # <div id='detail-section'> ... </div> を探す
+        m = re.search(r"<div id=['\"]detail-section['\"].*?>(.*?)</div>\s*(?:<script|</body>)", 
+                      content, re.DOTALL)
+        if m:
+            detail_html = m.group(1)
+            # <h2>📄 詳細内容</h2> を除去
+            detail_html = re.sub(r'<h2>.*?詳細内容.*?</h2>', '', detail_html, count=1)
+            return detail_html.strip() if detail_html.strip() else None
+    except Exception:
+        pass
+    return None
+
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) >= 3:
+    if len(sys.argv) >= 2 and sys.argv[1] == '--migrate':
+        # 移行モード: python ret_youyaku_html.py --migrate [base_dir]
+        base = sys.argv[2] if len(sys.argv) >= 3 else r"C:\temp\html"
+        migrate_legacy_html(base)
+    elif len(sys.argv) >= 3:
         vtt_path = sys.argv[1]
         video_title = sys.argv[2]
         url = sys.argv[3] if len(sys.argv) > 3 else None
