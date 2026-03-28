@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="template-version" content="4">
+<meta name="template-version" content="5">
 <style>
 body{font-family:sans-serif;line-height:1.7em;padding:1em;background:#121212;color:#fff}
 h1,h2,h3,h4{color:#ff9800;border-bottom:1px solid #333;padding-bottom:.3em;margin-top:1.5em}
@@ -12,10 +12,10 @@ p{margin-top:.8em}
 a{color:#4fc3f7;text-decoration:none}
 .timestamp-section{margin:1.5em 0}
 .timestamp-images{display:grid;grid-template-columns:repeat(6,1fr);gap:16px;margin-top:.8em}
-.thumb-container{position:relative;width:100%;aspect-ratio:16/9;transition:transform 0.2s;display:block}
+.thumb-container{position:relative;width:100%;aspect-ratio:16/9;transition:transform 0.2s;display:block;overflow:hidden}
 .thumb-container:hover{transform:scale(1.8);z-index:100}
 .thumb-img{width:100%;height:100%;object-fit:cover;border-radius:4px;cursor:pointer}
-.thumb-container::after{content:'▶';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,255,255,0.4);font-size:24px;background:rgba(0,0,0,0.4);padding:6px 14px;border-radius:50%;pointer-events:none}
+.thumb-container::after{content:'▶';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,255,255,0.4);font-size:24px;background:rgba(0,0,0,0.4);padding:6px 14px;border-radius:50%;pointer-events:none;z-index:3}
 .jump-link{background:#333;padding:10px;margin:10px 0;border-radius:5px;text-align:center}
 .detail-section{border-top:2px solid #666;margin-top:2em;padding-top:2em}
 .video-thumbnail{max-width:640px;width:100%;border-radius:8px;margin:1em 0;box-shadow:0 4px 8px rgba(0,0,0,.3)}
@@ -141,7 +141,7 @@ details.subtitle-toggle[open] summary{border-bottom:1px solid #333}
       sectionDiv.appendChild(bodyDiv);
     }
 
-    // 画像グリッド
+    // 画像グリッド（クリックでiframe埋め込み再生、ホバー外れるとサムネイル復帰）
     if (sec.images && sec.images.length > 0) {
       var gridDiv = document.createElement('div');
       gridDiv.className = 'timestamp-images';
@@ -150,18 +150,50 @@ details.subtitle-toggle[open] summary{border-bottom:1px solid #333}
         var startSec = Math.floor(img.start);
         var clickUrl = makeVideoLink(baseUrl, startSec);
 
-        var link = document.createElement('a');
-        link.className = 'thumb-container';
-        link.href = clickUrl;
-        link.target = '_blank';
+        var container = document.createElement('div');
+        container.className = 'thumb-container';
+        container.setAttribute('data-url', clickUrl);
 
         var thumbImg = document.createElement('img');
         thumbImg.className = 'thumb-img';
         thumbImg.src = img.src;
         thumbImg.loading = 'lazy';
 
-        link.appendChild(thumbImg);
-        gridDiv.appendChild(link);
+        container.appendChild(thumbImg);
+        gridDiv.appendChild(container);
+
+        // クリックでiframe埋め込み、ホバー外れると復帰
+        (function(el, thumbEl) {
+          var iframe = null;
+          el.addEventListener('click', function(e) {
+            e.preventDefault();
+            if (iframe) return;
+            var url = this.getAttribute('data-url');
+            iframe = document.createElement('iframe');
+            iframe.src = url;
+            iframe.style.width = '200%';
+            iframe.style.height = '200%';
+            iframe.style.border = 'none';
+            iframe.style.borderRadius = '4px';
+            iframe.style.position = 'absolute';
+            iframe.style.top = '0';
+            iframe.style.left = '0';
+            iframe.style.transformOrigin = 'top left';
+            iframe.style.transform = 'scale(0.5)';
+            iframe.style.zIndex = '4';
+            iframe.allowFullscreen = true;
+            thumbEl.style.visibility = 'hidden';
+            this.appendChild(iframe);
+          });
+          el.addEventListener('mouseleave', function() {
+            if (iframe) {
+              iframe.src = '';
+              this.removeChild(iframe);
+              iframe = null;
+            }
+            thumbEl.style.visibility = 'visible';
+          });
+        })(container, thumbImg);
       }
       sectionDiv.appendChild(gridDiv);
     }
@@ -210,7 +242,7 @@ details.subtitle-toggle[open] summary{border-bottom:1px solid #333}
     document.body.appendChild(detailDiv);
   }
 
-  // --- makeEmbedUrl は不要になったが互換性のため残す ---
+  // --- makeEmbedUrl, embedParams は不要になったが互換性のため残す ---
 })();
 </script>
 </body>

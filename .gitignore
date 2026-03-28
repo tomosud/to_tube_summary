@@ -42,6 +42,8 @@ api_key.txt
 #other
 *.bak
 /sample
+!/sample/playtest/
+!/sample/playtest/**
 /.serena
 /.claude
 nul

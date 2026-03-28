@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Embed &amp; Hover Test</title>
+<style>
+body{font-family:sans-serif;line-height:1.7em;padding:1em 2em;background:#121212;color:#fff;max-width:1400px;margin:0 auto}
+h1{color:#ff9800;border-bottom:1px solid #333;padding-bottom:.3em}
+h2{color:#ff9800;margin-top:2em}
+a{color:#4fc3f7;text-decoration:none}
+.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-top:1em}
+.thumb-container{position:relative;width:100%;aspect-ratio:16/9;transition:transform 0.2s;display:block}
+.thumb-container:hover{transform:scale(1.8);z-index:100}
+.thumb-img{width:100%;height:100%;object-fit:cover;border-radius:4px;cursor:pointer}
+.thumb-container::after{content:'▶';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,255,255,0.4);font-size:24px;background:rgba(0,0,0,0.4);padding:6px 14px;border-radius:50%;pointer-events:none}
+.label{font-size:.8em;color:#aaa;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.iframe-row{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-top:1em}
+.iframe-row iframe{width:100%;aspect-ratio:16/9;border:none;border-radius:4px}
+</style>
+</head>
+<body>
+<h1>動画埋め込み &amp; ホバー テスト</h1>
+
+<h2>1. サムネイル + ホバー拡大 + リンク（実運用形式）</h2>
+<p>ホバーで1.8倍拡大、クリックで別タブにyout-ube.comで遷移</p>
+<div class="grid">
+  <div>
+    <a class="thumb-container" href="https://www.yout-ube.com/watch?v=9Vyxjty9Qao&t=30" target="_blank">
+      <img class="thumb-img" src="images/Achieving_silky-smoo.jpg">
+    </a>
+    <div class="label">3D Gaussian Splash (t=30)</div>
+  </div>
+  <div>
+    <a class="thumb-container" href="https://www.yout-ube.com/watch?v=HCVkBC1Vhcw&t=120" target="_blank">
+      <img class="thumb-img" src="images/AI_classrooms_self-e.jpg">
+    </a>
+    <div class="label">AI classrooms (t=120)</div>
+  </div>
+  <div>
+    <a class="thumb-container" href="https://www.yout-ube.com/watch?v=pUb58eAZ3pc&t=60" target="_blank">
+      <img class="thumb-img" src="images/AI_is_finally_contro.jpg">
+    </a>
+    <div class="label">AI controllable (t=60)</div>
+  </div>
+  <div>
+    <a class="thumb-container" href="https://www.yout-ube.com/watch?v=fnMAIa2PEAk&t=200" target="_blank">
+      <img class="thumb-img" src="images/AI_thought-to-text_Q.jpg">
+    </a>
+    <div class="label">AI thought-to-text (t=200)</div>
+  </div>
+  <div>
+    <a class="thumb-container" href="https://www.yout-ube.com/watch?v=JqBeTCDIEHw&t=45" target="_blank">
+      <img class="thumb-img" src="images/Animating_the_OpenPo.jpg">
+    </a>
+    <div class="label">OpenPose Cascadeur (t=45)</div>
+  </div>
+  <div>
+    <a class="thumb-container" href="https://www.yout-ube.com/watch?v=m_s2AJrc1OQ&t=90" target="_blank">
+      <img class="thumb-img" src="images/EGSR2024_Robust_Cone.jpg">
+    </a>
+    <div class="label">Cone Step Mapping (t=90)</div>
+  </div>
+  <div>
+    <a class="thumb-container" href="https://www.yout-ube.com/watch?v=VSrQK6bSHko&t=150" target="_blank">
+      <img class="thumb-img" src="images/EYES_WIDE_SHUT_Recre.jpg">
+    </a>
+    <div class="label">Eyes Wide Shut (t=150)</div>
+  </div>
+  <div>
+    <a class="thumb-container" href="https://www.yout-ube.com/watch?v=2p5E7iXxeQE&t=80" target="_blank">
+      <img class="thumb-img" src="images/f07_–_Ultrafast_Lens.jpg">
+    </a>
+    <div class="label">Ultrafast Lenses (t=80)</div>
+  </div>
+  <div>
+    <a class="thumb-container" href="https://www.yout-ube.com/watch?v=MzAGXo1KZpA&t=110" target="_blank">
+      <img class="thumb-img" src="images/Frodo_Meets_Pawn_Sta.jpg">
+    </a>
+    <div class="label">Frodo Pawn Stars (t=110)</div>
+  </div>
+  <div>
+    <a class="thumb-container" href="https://www.yout-ube.com/watch?v=3hagi51IxeY&t=70" target="_blank">
+      <img class="thumb-img" src="images/Game-Ready_Topology_.jpg">
+    </a>
+    <div class="label">Game-Ready Topology (t=70)</div>
+  </div>
+</div>
+
+<h2>2. iframe埋め込みテスト（様々な動画）</h2>
+<p>yout-ube.com/watch 形式のiframe埋め込み</p>
+
+<h2>3. サムネイル → クリックでiframe埋め込み再生</h2>
+<p>ホバーで1.8倍拡大、クリックでサムネイルがiframeに置き換わりその場で再生</p>
+<div class="grid" id="click-to-play">
+  <div>
+    <div class="thumb-container click-play" data-url="https://www.yout-ube.com/watch?v=9Vyxjty9Qao&t=30">
+      <img class="thumb-img" src="images/Achieving_silky-smoo.jpg">
+    </div>
+    <div class="label">3D Gaussian Splash (t=30)</div>
+  </div>
+  <div>
+    <div class="thumb-container click-play" data-url="https://www.yout-ube.com/watch?v=HCVkBC1Vhcw&t=120">
+      <img class="thumb-img" src="images/AI_classrooms_self-e.jpg">
+    </div>
+    <div class="label">AI classrooms (t=120)</div>
+  </div>
+  <div>
+    <div class="thumb-container click-play" data-url="https://www.yout-ube.com/watch?v=pUb58eAZ3pc&t=60">
+      <img class="thumb-img" src="images/AI_is_finally_contro.jpg">
+    </div>
+    <div class="label">AI controllable (t=60)</div>
+  </div>
+  <div>
+    <div class="thumb-container click-play" data-url="https://www.yout-ube.com/watch?v=fnMAIa2PEAk&t=200">
+      <img class="thumb-img" src="images/AI_thought-to-text_Q.jpg">
+    </div>
+    <div class="label">AI thought-to-text (t=200)</div>
+  </div>
+  <div>
+    <div class="thumb-container click-play" data-url="https://www.yout-ube.com/watch?v=JqBeTCDIEHw&t=45">
+      <img class="thumb-img" src="images/Animating_the_OpenPo.jpg">
+    </div>
+    <div class="label">OpenPose Cascadeur (t=45)</div>
+  </div>
+  <div>
+    <div class="thumb-container click-play" data-url="https://www.yout-ube.com/watch?v=m_s2AJrc1OQ&t=90">
+      <img class="thumb-img" src="images/EGSR2024_Robust_Cone.jpg">
+    </div>
+    <div class="label">Cone Step Mapping (t=90)</div>
+  </div>
+  <div>
+    <div class="thumb-container click-play" data-url="https://www.yout-ube.com/watch?v=VSrQK6bSHko&t=150">
+      <img class="thumb-img" src="images/EYES_WIDE_SHUT_Recre.jpg">
+    </div>
+    <div class="label">Eyes Wide Shut (t=150)</div>
+  </div>
+  <div>
+    <div class="thumb-container click-play" data-url="https://www.yout-ube.com/watch?v=2p5E7iXxeQE&t=80">
+      <img class="thumb-img" src="images/f07_–_Ultrafast_Lens.jpg">
+    </div>
+    <div class="label">Ultrafast Lenses (t=80)</div>
+  </div>
+  <div>
+    <div class="thumb-container click-play" data-url="https://www.yout-ube.com/watch?v=MzAGXo1KZpA&t=110">
+      <img class="thumb-img" src="images/Frodo_Meets_Pawn_Sta.jpg">
+    </div>
+    <div class="label">Frodo Pawn Stars (t=110)</div>
+  </div>
+  <div>
+    <div class="thumb-container click-play" data-url="https://www.yout-ube.com/watch?v=3hagi51IxeY&t=70">
+      <img class="thumb-img" src="images/Game-Ready_Topology_.jpg">
+    </div>
+    <div class="label">Game-Ready Topology (t=70)</div>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.click-play').forEach(function(el) {
+  el.addEventListener('click', function(e) {
+    e.preventDefault();
+    var url = this.getAttribute('data-url');
+    var parent = this.parentElement;
+    var iframe = document.createElement('iframe');
+    iframe.src = url;
+    iframe.style.width = '100%';
+    iframe.style.aspectRatio = '16/9';
+    iframe.style.border = 'none';
+    iframe.style.borderRadius = '4px';
+    iframe.allowFullscreen = true;
+    parent.replaceChild(iframe, this);
+  });
+});
+</script>
+
+<h2>4. ホバーでiframe再生 → 離れると元のサムネイルに戻る</h2>
+<p>ホバー中のみ1.8倍iframeで再生。ホバーが外れるとサムネイルに戻り再生停止</p>
+<div class="grid" id="hover-to-play">
+  <div>
+    <div class="thumb-container hover-play" data-url="https://www.yout-ube.com/watch?v=9Vyxjty9Qao&t=30">
+      <img class="thumb-img" src="images/Achieving_silky-smoo.jpg">
+    </div>
+    <div class="label">3D Gaussian Splash (t=30)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-play" data-url="https://www.yout-ube.com/watch?v=HCVkBC1Vhcw&t=120">
+      <img class="thumb-img" src="images/AI_classrooms_self-e.jpg">
+    </div>
+    <div class="label">AI classrooms (t=120)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-play" data-url="https://www.yout-ube.com/watch?v=pUb58eAZ3pc&t=60">
+      <img class="thumb-img" src="images/AI_is_finally_contro.jpg">
+    </div>
+    <div class="label">AI controllable (t=60)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-play" data-url="https://www.yout-ube.com/watch?v=fnMAIa2PEAk&t=200">
+      <img class="thumb-img" src="images/AI_thought-to-text_Q.jpg">
+    </div>
+    <div class="label">AI thought-to-text (t=200)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-play" data-url="https://www.yout-ube.com/watch?v=JqBeTCDIEHw&t=45">
+      <img class="thumb-img" src="images/Animating_the_OpenPo.jpg">
+    </div>
+    <div class="label">OpenPose Cascadeur (t=45)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-play" data-url="https://www.yout-ube.com/watch?v=m_s2AJrc1OQ&t=90">
+      <img class="thumb-img" src="images/EGSR2024_Robust_Cone.jpg">
+    </div>
+    <div class="label">Cone Step Mapping (t=90)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-play" data-url="https://www.yout-ube.com/watch?v=VSrQK6bSHko&t=150">
+      <img class="thumb-img" src="images/EYES_WIDE_SHUT_Recre.jpg">
+    </div>
+    <div class="label">Eyes Wide Shut (t=150)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-play" data-url="https://www.yout-ube.com/watch?v=2p5E7iXxeQE&t=80">
+      <img class="thumb-img" src="images/f07_–_Ultrafast_Lens.jpg">
+    </div>
+    <div class="label">Ultrafast Lenses (t=80)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-play" data-url="https://www.yout-ube.com/watch?v=MzAGXo1KZpA&t=110">
+      <img class="thumb-img" src="images/Frodo_Meets_Pawn_Sta.jpg">
+    </div>
+    <div class="label">Frodo Pawn Stars (t=110)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-play" data-url="https://www.yout-ube.com/watch?v=3hagi51IxeY&t=70">
+      <img class="thumb-img" src="images/Game-Ready_Topology_.jpg">
+    </div>
+    <div class="label">Game-Ready Topology (t=70)</div>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.hover-play').forEach(function(el) {
+  var img = el.querySelector('.thumb-img');
+  var imgSrc = img.src;
+  var timer = null;
+
+  el.addEventListener('mouseenter', function() {
+    var url = this.getAttribute('data-url');
+    var container = this;
+    // 少し遅延を入れて通過時の無駄なロードを防ぐ
+    timer = setTimeout(function() {
+      var iframe = document.createElement('iframe');
+      iframe.src = url;
+      iframe.style.width = '100%';
+      iframe.style.height = '100%';
+      iframe.style.border = 'none';
+      iframe.style.borderRadius = '4px';
+      iframe.style.position = 'absolute';
+      iframe.style.top = '0';
+      iframe.style.left = '0';
+      iframe.setAttribute('data-hover-iframe', '1');
+      iframe.allowFullscreen = true;
+      img.style.visibility = 'hidden';
+      container.appendChild(iframe);
+    }, 200);
+  });
+
+  el.addEventListener('mouseleave', function() {
+    if (timer) { clearTimeout(timer); timer = null; }
+    var iframe = this.querySelector('[data-hover-iframe]');
+    if (iframe) {
+      iframe.src = '';  // 再生停止
+      this.removeChild(iframe);
+    }
+    img.style.visibility = 'visible';
+  });
+});
+</script>
+
+<h2>5. sandbox + referrerpolicy 対策テスト</h2>
+<p>sandbox="allow-scripts allow-same-origin allow-presentation" + referrerpolicy="no-referrer" を付与</p>
+
+<h3>5a. iframe直接埋め込み（対策付き）</h3>
+<div class="iframe-row">
+  <div>
+    <iframe src="https://www.yout-ube.com/watch?v=9Vyxjty9Qao&t=30" sandbox="allow-scripts allow-same-origin allow-presentation" referrerpolicy="no-referrer"></iframe>
+    <div class="label">3D Gaussian (sandbox+noref)</div>
+  </div>
+  <div>
+    <iframe src="https://www.yout-ube.com/watch?v=HCVkBC1Vhcw&t=120" sandbox="allow-scripts allow-same-origin allow-presentation" referrerpolicy="no-referrer"></iframe>
+    <div class="label">AI classrooms (sandbox+noref)</div>
+  </div>
+  <div>
+    <iframe src="https://www.yout-ube.com/watch?v=pUb58eAZ3pc&t=60" sandbox="allow-scripts allow-same-origin allow-presentation" referrerpolicy="no-referrer"></iframe>
+    <div class="label">AI controllable (sandbox+noref)</div>
+  </div>
+  <div>
+    <iframe src="https://www.yout-ube.com/watch?v=VSrQK6bSHko&t=150" sandbox="allow-scripts allow-same-origin allow-presentation" referrerpolicy="no-referrer"></iframe>
+    <div class="label">Eyes Wide Shut (sandbox+noref)</div>
+  </div>
+</div>
+
+<h3>5b. ホバーでiframe再生（対策付き）</h3>
+<div class="grid" id="hover-to-play-safe">
+  <div>
+    <div class="thumb-container hover-play-safe" data-url="https://www.yout-ube.com/watch?v=9Vyxjty9Qao&t=30">
+      <img class="thumb-img" src="images/Achieving_silky-smoo.jpg">
+    </div>
+    <div class="label">3D Gaussian (hover+safe)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-play-safe" data-url="https://www.yout-ube.com/watch?v=HCVkBC1Vhcw&t=120">
+      <img class="thumb-img" src="images/AI_classrooms_self-e.jpg">
+    </div>
+    <div class="label">AI classrooms (hover+safe)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-play-safe" data-url="https://www.yout-ube.com/watch?v=pUb58eAZ3pc&t=60">
+      <img class="thumb-img" src="images/AI_is_finally_contro.jpg">
+    </div>
+    <div class="label">AI controllable (hover+safe)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-play-safe" data-url="https://www.yout-ube.com/watch?v=fnMAIa2PEAk&t=200">
+      <img class="thumb-img" src="images/AI_thought-to-text_Q.jpg">
+    </div>
+    <div class="label">AI thought-to-text (hover+safe)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-play-safe" data-url="https://www.yout-ube.com/watch?v=JqBeTCDIEHw&t=45">
+      <img class="thumb-img" src="images/Animating_the_OpenPo.jpg">
+    </div>
+    <div class="label">OpenPose (hover+safe)</div>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.hover-play-safe').forEach(function(el) {
+  var img = el.querySelector('.thumb-img');
+  var timer = null;
+
+  el.addEventListener('mouseenter', function() {
+    var url = this.getAttribute('data-url');
+    var container = this;
+    timer = setTimeout(function() {
+      var iframe = document.createElement('iframe');
+      iframe.src = url;
+      iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation');
+      iframe.setAttribute('referrerpolicy', 'no-referrer');
+      iframe.style.width = '100%';
+      iframe.style.height = '100%';
+      iframe.style.border = 'none';
+      iframe.style.borderRadius = '4px';
+      iframe.style.position = 'absolute';
+      iframe.style.top = '0';
+      iframe.style.left = '0';
+      iframe.setAttribute('data-hover-iframe', '1');
+      iframe.allowFullscreen = true;
+      img.style.visibility = 'hidden';
+      container.appendChild(iframe);
+    }, 200);
+  });
+
+  el.addEventListener('mouseleave', function() {
+    if (timer) { clearTimeout(timer); timer = null; }
+    var iframe = this.querySelector('[data-hover-iframe]');
+    if (iframe) {
+      iframe.src = '';
+      this.removeChild(iframe);
+    }
+    img.style.visibility = 'visible';
+  });
+});
+</script>
+
+<h2>6. ホバー拡大 → クリックでiframe → ホバー外れるとサムネイルに戻る</h2>
+<p>ホバーで1.8倍拡大。クリックするとiframeに切り替わる。ホバーが外れると元のサムネイルに戻る</p>
+<div class="grid" id="test6">
+  <div>
+    <div class="thumb-container hover-click-play" data-url="https://www.yout-ube.com/watch?v=9Vyxjty9Qao&t=30">
+      <img class="thumb-img" src="images/Achieving_silky-smoo.jpg">
+    </div>
+    <div class="label">3D Gaussian Splash (t=30)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-click-play" data-url="https://www.yout-ube.com/watch?v=HCVkBC1Vhcw&t=120">
+      <img class="thumb-img" src="images/AI_classrooms_self-e.jpg">
+    </div>
+    <div class="label">AI classrooms (t=120)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-click-play" data-url="https://www.yout-ube.com/watch?v=pUb58eAZ3pc&t=60">
+      <img class="thumb-img" src="images/AI_is_finally_contro.jpg">
+    </div>
+    <div class="label">AI controllable (t=60)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-click-play" data-url="https://www.yout-ube.com/watch?v=fnMAIa2PEAk&t=200">
+      <img class="thumb-img" src="images/AI_thought-to-text_Q.jpg">
+    </div>
+    <div class="label">AI thought-to-text (t=200)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-click-play" data-url="https://www.yout-ube.com/watch?v=JqBeTCDIEHw&t=45">
+      <img class="thumb-img" src="images/Animating_the_OpenPo.jpg">
+    </div>
+    <div class="label">OpenPose Cascadeur (t=45)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-click-play" data-url="https://www.yout-ube.com/watch?v=m_s2AJrc1OQ&t=90">
+      <img class="thumb-img" src="images/EGSR2024_Robust_Cone.jpg">
+    </div>
+    <div class="label">Cone Step Mapping (t=90)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-click-play" data-url="https://www.yout-ube.com/watch?v=VSrQK6bSHko&t=150">
+      <img class="thumb-img" src="images/EYES_WIDE_SHUT_Recre.jpg">
+    </div>
+    <div class="label">Eyes Wide Shut (t=150)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-click-play" data-url="https://www.yout-ube.com/watch?v=2p5E7iXxeQE&t=80">
+      <img class="thumb-img" src="images/f07_–_Ultrafast_Lens.jpg">
+    </div>
+    <div class="label">Ultrafast Lenses (t=80)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-click-play" data-url="https://www.yout-ube.com/watch?v=MzAGXo1KZpA&t=110">
+      <img class="thumb-img" src="images/Frodo_Meets_Pawn_Sta.jpg">
+    </div>
+    <div class="label">Frodo Pawn Stars (t=110)</div>
+  </div>
+  <div>
+    <div class="thumb-container hover-click-play" data-url="https://www.yout-ube.com/watch?v=3hagi51IxeY&t=70">
+      <img class="thumb-img" src="images/Game-Ready_Topology_.jpg">
+    </div>
+    <div class="label">Game-Ready Topology (t=70)</div>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.hover-click-play').forEach(function(el) {
+  var img = el.querySelector('.thumb-img');
+  var iframe = null;
+
+  el.addEventListener('click', function(e) {
+    e.preventDefault();
+    if (iframe) return; // 既にiframe表示中
+    var url = this.getAttribute('data-url');
+    iframe = document.createElement('iframe');
+    iframe.src = url;
+    iframe.style.width = '100%';
+    iframe.style.height = '100%';
+    iframe.style.border = 'none';
+    iframe.style.borderRadius = '4px';
+    iframe.style.position = 'absolute';
+    iframe.style.top = '0';
+    iframe.style.left = '0';
+    iframe.allowFullscreen = true;
+    img.style.visibility = 'hidden';
+    this.appendChild(iframe);
+  });
+
+  el.addEventListener('mouseleave', function() {
+    if (iframe) {
+      iframe.src = '';
+      this.removeChild(iframe);
+      iframe = null;
+    }
+    img.style.visibility = 'visible';
+  });
+});
+</script>
+
+<h2>7. iframe常駐 + サムネイルかぶせ → クリックで剥がす → ホバー外れると戻る</h2>
+<p>iframeは最初から埋め込み済み。サムネイルを上に重ねて隠す。クリックでサムネイルを消してiframeを露出。ホバー外れるとサムネイル復帰</p>
+<div class="grid" id="test7">
+  <div>
+    <div class="thumb-container overlay-play" data-url="https://www.yout-ube.com/watch?v=9Vyxjty9Qao&t=30">
+      <iframe src="https://www.yout-ube.com/watch?v=9Vyxjty9Qao&t=30" style="width:100%;height:100%;border:none;border-radius:4px;position:absolute;top:0;left:0"></iframe>
+      <img class="thumb-img overlay-img" src="images/Achieving_silky-smoo.jpg" style="position:absolute;top:0;left:0;z-index:2">
+    </div>
+    <div class="label">3D Gaussian Splash (t=30)</div>
+  </div>
+  <div>
+    <div class="thumb-container overlay-play" data-url="https://www.yout-ube.com/watch?v=HCVkBC1Vhcw&t=120">
+      <iframe src="https://www.yout-ube.com/watch?v=HCVkBC1Vhcw&t=120" style="width:100%;height:100%;border:none;border-radius:4px;position:absolute;top:0;left:0"></iframe>
+      <img class="thumb-img overlay-img" src="images/AI_classrooms_self-e.jpg" style="position:absolute;top:0;left:0;z-index:2">
+    </div>
+    <div class="label">AI classrooms (t=120)</div>
+  </div>
+  <div>
+    <div class="thumb-container overlay-play" data-url="https://www.yout-ube.com/watch?v=pUb58eAZ3pc&t=60">
+      <iframe src="https://www.yout-ube.com/watch?v=pUb58eAZ3pc&t=60" style="width:100%;height:100%;border:none;border-radius:4px;position:absolute;top:0;left:0"></iframe>
+      <img class="thumb-img overlay-img" src="images/AI_is_finally_contro.jpg" style="position:absolute;top:0;left:0;z-index:2">
+    </div>
+    <div class="label">AI controllable (t=60)</div>
+  </div>
+  <div>
+    <div class="thumb-container overlay-play" data-url="https://www.yout-ube.com/watch?v=fnMAIa2PEAk&t=200">
+      <iframe src="https://www.yout-ube.com/watch?v=fnMAIa2PEAk&t=200" style="width:100%;height:100%;border:none;border-radius:4px;position:absolute;top:0;left:0"></iframe>
+      <img class="thumb-img overlay-img" src="images/AI_thought-to-text_Q.jpg" style="position:absolute;top:0;left:0;z-index:2">
+    </div>
+    <div class="label">AI thought-to-text (t=200)</div>
+  </div>
+  <div>
+    <div class="thumb-container overlay-play" data-url="https://www.yout-ube.com/watch?v=JqBeTCDIEHw&t=45">
+      <iframe src="https://www.yout-ube.com/watch?v=JqBeTCDIEHw&t=45" style="width:100%;height:100%;border:none;border-radius:4px;position:absolute;top:0;left:0"></iframe>
+      <img class="thumb-img overlay-img" src="images/Animating_the_OpenPo.jpg" style="position:absolute;top:0;left:0;z-index:2">
+    </div>
+    <div class="label">OpenPose Cascadeur (t=45)</div>
+  </div>
+  <div>
+    <div class="thumb-container overlay-play" data-url="https://www.yout-ube.com/watch?v=m_s2AJrc1OQ&t=90">
+      <iframe src="https://www.yout-ube.com/watch?v=m_s2AJrc1OQ&t=90" style="width:100%;height:100%;border:none;border-radius:4px;position:absolute;top:0;left:0"></iframe>
+      <img class="thumb-img overlay-img" src="images/EGSR2024_Robust_Cone.jpg" style="position:absolute;top:0;left:0;z-index:2">
+    </div>
+    <div class="label">Cone Step Mapping (t=90)</div>
+  </div>
+  <div>
+    <div class="thumb-container overlay-play" data-url="https://www.yout-ube.com/watch?v=VSrQK6bSHko&t=150">
+      <iframe src="https://www.yout-ube.com/watch?v=VSrQK6bSHko&t=150" style="width:100%;height:100%;border:none;border-radius:4px;position:absolute;top:0;left:0"></iframe>
+      <img class="thumb-img overlay-img" src="images/EYES_WIDE_SHUT_Recre.jpg" style="position:absolute;top:0;left:0;z-index:2">
+    </div>
+    <div class="label">Eyes Wide Shut (t=150)</div>
+  </div>
+  <div>
+    <div class="thumb-container overlay-play" data-url="https://www.yout-ube.com/watch?v=2p5E7iXxeQE&t=80">
+      <iframe src="https://www.yout-ube.com/watch?v=2p5E7iXxeQE&t=80" style="width:100%;height:100%;border:none;border-radius:4px;position:absolute;top:0;left:0"></iframe>
+      <img class="thumb-img overlay-img" src="images/f07_–_Ultrafast_Lens.jpg" style="position:absolute;top:0;left:0;z-index:2">
+    </div>
+    <div class="label">Ultrafast Lenses (t=80)</div>
+  </div>
+  <div>
+    <div class="thumb-container overlay-play" data-url="https://www.yout-ube.com/watch?v=MzAGXo1KZpA&t=110">
+      <iframe src="https://www.yout-ube.com/watch?v=MzAGXo1KZpA&t=110" style="width:100%;height:100%;border:none;border-radius:4px;position:absolute;top:0;left:0"></iframe>
+      <img class="thumb-img overlay-img" src="images/Frodo_Meets_Pawn_Sta.jpg" style="position:absolute;top:0;left:0;z-index:2">
+    </div>
+    <div class="label">Frodo Pawn Stars (t=110)</div>
+  </div>
+  <div>
+    <div class="thumb-container overlay-play" data-url="https://www.yout-ube.com/watch?v=3hagi51IxeY&t=70">
+      <iframe src="https://www.yout-ube.com/watch?v=3hagi51IxeY&t=70" style="width:100%;height:100%;border:none;border-radius:4px;position:absolute;top:0;left:0"></iframe>
+      <img class="thumb-img overlay-img" src="images/Game-Ready_Topology_.jpg" style="position:absolute;top:0;left:0;z-index:2">
+    </div>
+    <div class="label">Game-Ready Topology (t=70)</div>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.overlay-play').forEach(function(el) {
+  var img = el.querySelector('.overlay-img');
+
+  el.addEventListener('click', function(e) {
+    e.preventDefault();
+    // サムネイルを非表示にしてiframeを露出
+    img.style.visibility = 'hidden';
+    img.style.pointerEvents = 'none';
+  });
+
+  el.addEventListener('mouseleave', function() {
+    // サムネイルを復帰
+    img.style.visibility = 'visible';
+    img.style.pointerEvents = 'auto';
+  });
+});
+</script>
+
+<h2>8. ホバーで裏にiframe先読み → クリックで露出 → ホバー外れたらiframe破棄</h2>
+<p>ホバー開始時にiframeを裏で生成（先読み）。クリックでサムネイルを消して露出。ホバー外れるとiframeごと破棄して再生停止、サムネイル復帰</p>
+<div class="grid" id="test8">
+  <div>
+    <div class="thumb-container preload-play" data-url="https://www.yout-ube.com/watch?v=9Vyxjty9Qao&t=30">
+      <img class="thumb-img" src="images/Achieving_silky-smoo.jpg">
+    </div>
+    <div class="label">3D Gaussian Splash (t=30)</div>
+  </div>
+  <div>
+    <div class="thumb-container preload-play" data-url="https://www.yout-ube.com/watch?v=HCVkBC1Vhcw&t=120">
+      <img class="thumb-img" src="images/AI_classrooms_self-e.jpg">
+    </div>
+    <div class="label">AI classrooms (t=120)</div>
+  </div>
+  <div>
+    <div class="thumb-container preload-play" data-url="https://www.yout-ube.com/watch?v=pUb58eAZ3pc&t=60">
+      <img class="thumb-img" src="images/AI_is_finally_contro.jpg">
+    </div>
+    <div class="label">AI controllable (t=60)</div>
+  </div>
+  <div>
+    <div class="thumb-container preload-play" data-url="https://www.yout-ube.com/watch?v=fnMAIa2PEAk&t=200">
+      <img class="thumb-img" src="images/AI_thought-to-text_Q.jpg">
+    </div>
+    <div class="label">AI thought-to-text (t=200)</div>
+  </div>
+  <div>
+    <div class="thumb-container preload-play" data-url="https://www.yout-ube.com/watch?v=JqBeTCDIEHw&t=45">
+      <img class="thumb-img" src="images/Animating_the_OpenPo.jpg">
+    </div>
+    <div class="label">OpenPose Cascadeur (t=45)</div>
+  </div>
+  <div>
+    <div class="thumb-container preload-play" data-url="https://www.yout-ube.com/watch?v=m_s2AJrc1OQ&t=90">
+      <img class="thumb-img" src="images/EGSR2024_Robust_Cone.jpg">
+    </div>
+    <div class="label">Cone Step Mapping (t=90)</div>
+  </div>
+  <div>
+    <div class="thumb-container preload-play" data-url="https://www.yout-ube.com/watch?v=VSrQK6bSHko&t=150">
+      <img class="thumb-img" src="images/EYES_WIDE_SHUT_Recre.jpg">
+    </div>
+    <div class="label">Eyes Wide Shut (t=150)</div>
+  </div>
+  <div>
+    <div class="thumb-container preload-play" data-url="https://www.yout-ube.com/watch?v=2p5E7iXxeQE&t=80">
+      <img class="thumb-img" src="images/f07_–_Ultrafast_Lens.jpg">
+    </div>
+    <div class="label">Ultrafast Lenses (t=80)</div>
+  </div>
+  <div>
+    <div class="thumb-container preload-play" data-url="https://www.yout-ube.com/watch?v=MzAGXo1KZpA&t=110">
+      <img class="thumb-img" src="images/Frodo_Meets_Pawn_Sta.jpg">
+    </div>
+    <div class="label">Frodo Pawn Stars (t=110)</div>
+  </div>
+  <div>
+    <div class="thumb-container preload-play" data-url="https://www.yout-ube.com/watch?v=3hagi51IxeY&t=70">
+      <img class="thumb-img" src="images/Game-Ready_Topology_.jpg">
+    </div>
+    <div class="label">Game-Ready Topology (t=70)</div>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.preload-play').forEach(function(el) {
+  var img = el.querySelector('.thumb-img');
+  var iframe = null;
+
+  // サムネイルを常にiframeの上に表示
+  img.style.position = 'absolute';
+  img.style.top = '0';
+  img.style.left = '0';
+  img.style.zIndex = '2';
+
+  el.addEventListener('mouseenter', function() {
+    if (iframe) return; // 既にある場合はスキップ
+    var url = this.getAttribute('data-url');
+    // ホバー時にiframeを裏で先読み開始（z-index:1でサムネイルの下）
+    iframe = document.createElement('iframe');
+    iframe.src = url;
+    iframe.style.width = '100%';
+    iframe.style.height = '100%';
+    iframe.style.border = 'none';
+    iframe.style.borderRadius = '4px';
+    iframe.style.position = 'absolute';
+    iframe.style.top = '0';
+    iframe.style.left = '0';
+    iframe.style.zIndex = '1';
+    iframe.allowFullscreen = true;
+    this.appendChild(iframe);
+    // サムネイル(z-index:2)が上に被さっているのでiframeは見えない
+  });
+
+  el.addEventListener('click', function(e) {
+    e.preventDefault();
+    if (!iframe) return;
+    // サムネイルを消してiframeを露出
+    img.style.visibility = 'hidden';
+    img.style.pointerEvents = 'none';
+  });
+
+  el.addEventListener('mouseleave', function() {
+    // iframeを完全に破棄して再生停止
+    if (iframe) {
+      iframe.src = '';
+      this.removeChild(iframe);
+      iframe = null;
+    }
+    // サムネイル復帰
+    img.style.visibility = 'visible';
+    img.style.pointerEvents = 'auto';
+  });
+});
+</script>
+
+<h2>9. ホバー拡大 → クリックでiframe → ホバー外れると戻る + 別タブリンク付き</h2>
+<p>6と同じ挙動 + サムネイル下に別タブで開くリンク。またiframeを2倍サイズで描画→scale(0.5)で縮小表示し、YouTube UIが大きくなりすぎる問題に対処</p>
+<div class="grid" id="test9">
+  <div>
+    <div class="thumb-container embed-with-link" data-url="https://www.yout-ube.com/watch?v=9Vyxjty9Qao&t=30">
+      <img class="thumb-img" src="images/Achieving_silky-smoo.jpg">
+    </div>
+    <div class="label"><a href="https://www.yout-ube.com/watch?v=9Vyxjty9Qao&t=30" target="_blank">3D Gaussian Splash (t=30) ↗</a></div>
+  </div>
+  <div>
+    <div class="thumb-container embed-with-link" data-url="https://www.yout-ube.com/watch?v=HCVkBC1Vhcw&t=120">
+      <img class="thumb-img" src="images/AI_classrooms_self-e.jpg">
+    </div>
+    <div class="label"><a href="https://www.yout-ube.com/watch?v=HCVkBC1Vhcw&t=120" target="_blank">AI classrooms (t=120) ↗</a></div>
+  </div>
+  <div>
+    <div class="thumb-container embed-with-link" data-url="https://www.yout-ube.com/watch?v=pUb58eAZ3pc&t=60">
+      <img class="thumb-img" src="images/AI_is_finally_contro.jpg">
+    </div>
+    <div class="label"><a href="https://www.yout-ube.com/watch?v=pUb58eAZ3pc&t=60" target="_blank">AI controllable (t=60) ↗</a></div>
+  </div>
+  <div>
+    <div class="thumb-container embed-with-link" data-url="https://www.yout-ube.com/watch?v=fnMAIa2PEAk&t=200">
+      <img class="thumb-img" src="images/AI_thought-to-text_Q.jpg">
+    </div>
+    <div class="label"><a href="https://www.yout-ube.com/watch?v=fnMAIa2PEAk&t=200" target="_blank">AI thought-to-text (t=200) ↗</a></div>
+  </div>
+  <div>
+    <div class="thumb-container embed-with-link" data-url="https://www.yout-ube.com/watch?v=JqBeTCDIEHw&t=45">
+      <img class="thumb-img" src="images/Animating_the_OpenPo.jpg">
+    </div>
+    <div class="label"><a href="https://www.yout-ube.com/watch?v=JqBeTCDIEHw&t=45" target="_blank">OpenPose Cascadeur (t=45) ↗</a></div>
+  </div>
+  <div>
+    <div class="thumb-container embed-with-link" data-url="https://www.yout-ube.com/watch?v=m_s2AJrc1OQ&t=90">
+      <img class="thumb-img" src="images/EGSR2024_Robust_Cone.jpg">
+    </div>
+    <div class="label"><a href="https://www.yout-ube.com/watch?v=m_s2AJrc1OQ&t=90" target="_blank">Cone Step Mapping (t=90) ↗</a></div>
+  </div>
+  <div>
+    <div class="thumb-container embed-with-link" data-url="https://www.yout-ube.com/watch?v=VSrQK6bSHko&t=150">
+      <img class="thumb-img" src="images/EYES_WIDE_SHUT_Recre.jpg">
+    </div>
+    <div class="label"><a href="https://www.yout-ube.com/watch?v=VSrQK6bSHko&t=150" target="_blank">Eyes Wide Shut (t=150) ↗</a></div>
+  </div>
+  <div>
+    <div class="thumb-container embed-with-link" data-url="https://www.yout-ube.com/watch?v=2p5E7iXxeQE&t=80">
+      <img class="thumb-img" src="images/f07_–_Ultrafast_Lens.jpg">
+    </div>
+    <div class="label"><a href="https://www.yout-ube.com/watch?v=2p5E7iXxeQE&t=80" target="_blank">Ultrafast Lenses (t=80) ↗</a></div>
+  </div>
+  <div>
+    <div class="thumb-container embed-with-link" data-url="https://www.yout-ube.com/watch?v=MzAGXo1KZpA&t=110">
+      <img class="thumb-img" src="images/Frodo_Meets_Pawn_Sta.jpg">
+    </div>
+    <div class="label"><a href="https://www.yout-ube.com/watch?v=MzAGXo1KZpA&t=110" target="_blank">Frodo Pawn Stars (t=110) ↗</a></div>
+  </div>
+  <div>
+    <div class="thumb-container embed-with-link" data-url="https://www.yout-ube.com/watch?v=3hagi51IxeY&t=70">
+      <img class="thumb-img" src="images/Game-Ready_Topology_.jpg">
+    </div>
+    <div class="label"><a href="https://www.yout-ube.com/watch?v=3hagi51IxeY&t=70" target="_blank">Game-Ready Topology (t=70) ↗</a></div>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.embed-with-link').forEach(function(el) {
+  var img = el.querySelector('.thumb-img');
+  var iframe = null;
+
+  el.addEventListener('click', function(e) {
+    e.preventDefault();
+    if (iframe) return;
+    var url = this.getAttribute('data-url');
+    // 2倍サイズのiframeをscale(0.5)で縮小表示
+    // → YouTube UIが小さいサムネイルで巨大化する問題を回避
+    iframe = document.createElement('iframe');
+    iframe.src = url;
+    iframe.style.width = '200%';
+    iframe.style.height = '200%';
+    iframe.style.border = 'none';
+    iframe.style.borderRadius = '4px';
+    iframe.style.position = 'absolute';
+    iframe.style.top = '0';
+    iframe.style.left = '0';
+    iframe.style.transformOrigin = 'top left';
+    iframe.style.transform = 'scale(0.5)';
+    iframe.allowFullscreen = true;
+    img.style.visibility = 'hidden';
+    this.appendChild(iframe);
+  });
+
+  el.addEventListener('mouseleave', function() {
+    if (iframe) {
+      iframe.src = '';
+      this.removeChild(iframe);
+      iframe = null;
+    }
+    img.style.visibility = 'visible';
+  });
+});
+</script>
+
+<h2>10. ホバー拡大 → クリックでiframe(scale縮小) → ホバー外れると戻る（リンクなし）</h2>
+<p>9からリンクを除去。全画面表示が使えるため不要</p>
+<div class="grid" id="test10">
+  <div>
+    <div class="thumb-container embed-no-link" data-url="https://www.yout-ube.com/watch?v=9Vyxjty9Qao&t=30">
+      <img class="thumb-img" src="images/Achieving_silky-smoo.jpg">
+    </div>
+    <div class="label">3D Gaussian Splash (t=30)</div>
+  </div>
+  <div>
+    <div class="thumb-container embed-no-link" data-url="https://www.yout-ube.com/watch?v=HCVkBC1Vhcw&t=120">
+      <img class="thumb-img" src="images/AI_classrooms_self-e.jpg">
+    </div>
+    <div class="label">AI classrooms (t=120)</div>
+  </div>
+  <div>
+    <div class="thumb-container embed-no-link" data-url="https://www.yout-ube.com/watch?v=pUb58eAZ3pc&t=60">
+      <img class="thumb-img" src="images/AI_is_finally_contro.jpg">
+    </div>
+    <div class="label">AI controllable (t=60)</div>
+  </div>
+  <div>
+    <div class="thumb-container embed-no-link" data-url="https://www.yout-ube.com/watch?v=fnMAIa2PEAk&t=200">
+      <img class="thumb-img" src="images/AI_thought-to-text_Q.jpg">
+    </div>
+    <div class="label">AI thought-to-text (t=200)</div>
+  </div>
+  <div>
+    <div class="thumb-container embed-no-link" data-url="https://www.yout-ube.com/watch?v=JqBeTCDIEHw&t=45">
+      <img class="thumb-img" src="images/Animating_the_OpenPo.jpg">
+    </div>
+    <div class="label">OpenPose Cascadeur (t=45)</div>
+  </div>
+  <div>
+    <div class="thumb-container embed-no-link" data-url="https://www.yout-ube.com/watch?v=m_s2AJrc1OQ&t=90">
+      <img class="thumb-img" src="images/EGSR2024_Robust_Cone.jpg">
+    </div>
+    <div class="label">Cone Step Mapping (t=90)</div>
+  </div>
+  <div>
+    <div class="thumb-container embed-no-link" data-url="https://www.yout-ube.com/watch?v=VSrQK6bSHko&t=150">
+      <img class="thumb-img" src="images/EYES_WIDE_SHUT_Recre.jpg">
+    </div>
+    <div class="label">Eyes Wide Shut (t=150)</div>
+  </div>
+  <div>
+    <div class="thumb-container embed-no-link" data-url="https://www.yout-ube.com/watch?v=2p5E7iXxeQE&t=80">
+      <img class="thumb-img" src="images/f07_–_Ultrafast_Lens.jpg">
+    </div>
+    <div class="label">Ultrafast Lenses (t=80)</div>
+  </div>
+  <div>
+    <div class="thumb-container embed-no-link" data-url="https://www.yout-ube.com/watch?v=MzAGXo1KZpA&t=110">
+      <img class="thumb-img" src="images/Frodo_Meets_Pawn_Sta.jpg">
+    </div>
+    <div class="label">Frodo Pawn Stars (t=110)</div>
+  </div>
+  <div>
+    <div class="thumb-container embed-no-link" data-url="https://www.yout-ube.com/watch?v=3hagi51IxeY&t=70">
+      <img class="thumb-img" src="images/Game-Ready_Topology_.jpg">
+    </div>
+    <div class="label">Game-Ready Topology (t=70)</div>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.embed-no-link').forEach(function(el) {
+  var img = el.querySelector('.thumb-img');
+  var iframe = null;
+
+  el.addEventListener('click', function(e) {
+    e.preventDefault();
+    if (iframe) return;
+    var url = this.getAttribute('data-url');
+    iframe = document.createElement('iframe');
+    iframe.src = url;
+    iframe.style.width = '200%';
+    iframe.style.height = '200%';
+    iframe.style.border = 'none';
+    iframe.style.borderRadius = '4px';
+    iframe.style.position = 'absolute';
+    iframe.style.top = '0';
+    iframe.style.left = '0';
+    iframe.style.transformOrigin = 'top left';
+    iframe.style.transform = 'scale(0.5)';
+    iframe.allowFullscreen = true;
+    img.style.visibility = 'hidden';
+    this.appendChild(iframe);
+  });
+
+  el.addEventListener('mouseleave', function() {
+    if (iframe) {
+      iframe.src = '';
+      this.removeChild(iframe);
+      iframe = null;
+    }
+    img.style.visibility = 'visible';
+  });
+});
+</script>
+
+<h2>--- 以下セクション2（iframe直接埋め込み・対策なし）---</h2>
+<div class="iframe-row">
+  <div>
+    <iframe src="https://www.yout-ube.com/watch?v=9Vyxjty9Qao&t=30"></iframe>
+    <div class="label">3D Gaussian Splash (t=30)</div>
+  </div>
+  <div>
+    <iframe src="https://www.yout-ube.com/watch?v=HCVkBC1Vhcw&t=120"></iframe>
+    <div class="label">AI classrooms (t=120)</div>
+  </div>
+  <div>
+    <iframe src="https://www.yout-ube.com/watch?v=pUb58eAZ3pc&t=60"></iframe>
+    <div class="label">AI controllable (t=60)</div>
+  </div>
+  <div>
+    <iframe src="https://www.yout-ube.com/watch?v=fnMAIa2PEAk&t=200"></iframe>
+    <div class="label">AI thought-to-text (t=200)</div>
+  </div>
+  <div>
+    <iframe src="https://www.yout-ube.com/watch?v=JqBeTCDIEHw&t=45"></iframe>
+    <div class="label">OpenPose Cascadeur (t=45)</div>
+  </div>
+  <div>
+    <iframe src="https://www.yout-ube.com/watch?v=m_s2AJrc1OQ&t=90"></iframe>
+    <div class="label">Cone Step Mapping (t=90)</div>
+  </div>
+  <div>
+    <iframe src="https://www.yout-ube.com/watch?v=VSrQK6bSHko&t=150"></iframe>
+    <div class="label">Eyes Wide Shut (t=150)</div>
+  </div>
+  <div>
+    <iframe src="https://www.yout-ube.com/watch?v=2p5E7iXxeQE&t=80"></iframe>
+    <div class="label">Ultrafast Lenses (t=80)</div>
+  </div>
+  <div>
+    <iframe src="https://www.yout-ube.com/watch?v=MzAGXo1KZpA&t=110"></iframe>
+    <div class="label">Frodo Pawn Stars (t=110)</div>
+  </div>
+  <div>
+    <iframe src="https://www.yout-ube.com/watch?v=3hagi51IxeY&t=70"></iframe>
+    <div class="label">Game-Ready Topology (t=70)</div>
+  </div>
+</div>
+
+</body>
+</html>

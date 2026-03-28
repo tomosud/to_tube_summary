@@ -9,7 +9,7 @@ import tkinter as tk
 from tkinter import simpledialog
 
 # テンプレートのバージョン（template/index.html の <meta name="template-version"> と一致させる）
-TEMPLATE_VERSION = 4
+TEMPLATE_VERSION = 5
 # テンプレートファイルのパス
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template')
 TEMPLATE_HTML = os.path.join(TEMPLATE_DIR, 'index.html')
