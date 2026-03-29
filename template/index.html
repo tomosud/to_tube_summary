@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="template-version" content="5">
+<meta name="template-version" content="6">
 <style>
 body{font-family:sans-serif;line-height:1.7em;padding:1em;background:#121212;color:#fff}
 h1,h2,h3,h4{color:#ff9800;border-bottom:1px solid #333;padding-bottom:.3em;margin-top:1.5em}
@@ -99,6 +99,11 @@ details.subtitle-toggle[open] summary{border-bottom:1px solid #333}
 
   var videoId = data.video_id;
   var baseUrl = data.url || '';
+
+  // --- タブタイトルを最初の見出しから設定 ---
+  if (data.sections.length > 0 && data.sections[0].heading) {
+    document.title = data.sections[0].heading;
+  }
 
   // --- サムネイル ---
   if (data.thumbnail) {
