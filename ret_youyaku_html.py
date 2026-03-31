@@ -5,9 +5,26 @@ import shutil
 import glob
 import hashlib
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
+from pydantic import BaseModel
+from typing import List
 import tkinter as tk
 from tkinter import simpledialog
+
+
+# ── Structured Outputs 用 Pydantic モデル ──────────────────────────────────
+
+class _Section(BaseModel):
+    heading: str        # セクション見出し（日本語、20字以内）
+    start_seconds: int  # そのセクションが始まる秒数
+
+class _OutlineResult(BaseModel):
+    sections: List[_Section]
+
+class _SectionSummary(BaseModel):
+    heading: str  # 結論を含む一行要約の見出し（20〜40字）
+    summary: str  # Markdown本文（見出し行なし）
 
 # テンプレートファイルのパス
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template')
@@ -161,129 +178,305 @@ def judge_good_time_split(text_lines,vtt_lines):
 
     return True
 
-def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, thumbnail_path=None):
-    """字幕ファイルを要約してHTMLを生成する"""
-    result_merged_txt = read_vtt(vtt)
 
-    # VTTエントリをパース（展開可能な字幕表示用）
+# ── 2段階要約 ヘルパー関数群 ───────────────────────────────────────────────
+
+def _seconds_to_label(sec: int) -> str:
+    """秒数を「X分Y秒」形式に変換（judge_good_time_split の format_time と同様）"""
+    m, s = divmod(sec, 60)
+    h, m = divmod(m, 60)
+    if h:
+        return f"{h}時間{m}分{s}秒"
+    return f"{m}分{s}秒"
+
+
+def build_section_text(vtt_entries, start_sec: int, end_sec: int) -> str:
+    """指定時間範囲の字幕テキストを抽出し、約60秒ごとに[MM:SS]マーカーを挿入して返す。
+
+    get_subtitle_for_range() と同じ重複除去ロジックを使用するが、
+    モデルへの時間アンカーとして [MM:SS] マーカーを挿入する点が異なる。
+    """
+    texts = []
+    last_marker_sec = -999
+
+    for entry_start, _entry_end, text in vtt_entries:
+        if entry_start < start_sec:
+            continue
+        if entry_start >= end_sec:
+            break
+
+        # 約60秒ごとに時刻マーカーを挿入
+        if entry_start - last_marker_sec >= 60:
+            m, s = divmod(int(entry_start), 60)
+            texts.append(f"[{m:02d}:{s:02d}]")
+            last_marker_sec = entry_start
+
+        texts.append(text)
+
+    # 重複除去（get_subtitle_for_range と同じロジック）
+    merged = []
+    for text in texts:
+        if text.startswith('[') and text.endswith(']'):
+            merged.append(text)
+            continue
+        if merged and text == merged[-1]:
+            continue
+        if merged and not (merged[-1].startswith('[') and merged[-1].endswith(']')):
+            prev = merged[-1]
+            max_overlap = min(len(prev), len(text), 50)
+            overlap_found = False
+            for overlap_len in range(max_overlap, 2, -1):
+                if prev.endswith(text[:overlap_len]):
+                    merged[-1] = prev + text[overlap_len:]
+                    overlap_found = True
+                    break
+            if overlap_found:
+                continue
+        merged.append(text)
+
+    return ' '.join(merged)
+
+
+def _validate_outline(outline: _OutlineResult, video_duration_sec: int) -> bool:
+    """Stage 1 のアウトラインが適切な分散を持つか検証する"""
+    if len(outline.sections) < 3:
+        return False
+    starts = [s.start_seconds for s in outline.sections]
+    if starts != sorted(starts):
+        return False
+    if len(starts) != len(set(starts)):
+        return False
+    if video_duration_sec > 0 and (starts[-1] / video_duration_sec) < 0.5:
+        return False
+    return True
+
+
+def stage1_get_outline(vtt_entries, title: str, video_duration_sec: int) -> _OutlineResult:
+    """Stage 1: VTT全体からセクションのアウトライン（見出し＋開始秒数）を取得する。
+
+    Structured Outputs を使用して _OutlineResult を返す。
+    最大3回リトライし、失敗した場合は ValueError を送出する。
+    """
+    # Stage 1 用テキスト: 全体を通して [MM:SS] マーカー付きで抽出
+    full_text = build_section_text(vtt_entries, 0, float('inf'))
+
+    duration_min = video_duration_sec // 60
+
+    system_prompt = (
+        "あなたは動画字幕の構造分析スペシャリストです。"
+        "字幕の流れを読み、話題の切れ目を正確に識別します。"
+    )
+
+    MAX_RETRIES = 3
+    extra_hint = ""
+    for attempt in range(MAX_RETRIES):
+        user_prompt = (
+            f"以下は動画「{title}」の字幕テキストです（[MM:SS]形式の時刻マーカーが約60秒ごとに含まれています）。\n"
+            f"字幕の流れを分析し、話題の切れ目でセクションに分割してください。\n\n"
+            f"【ルール】\n"
+            f"- セクション数は動画の長さに応じて5〜20個程度にしてください（動画時間: 約{duration_min}分）。\n"
+            f"- headingは日本語で、その話題を端的に表す20字以内のタイトルにしてください。\n"
+            f"- start_secondsは、そのセクションの話題が始まる秒数を整数で指定してください（[MM:SS]マーカーを参考にしてください）。\n"
+            f"- セクションは必ず時系列順（start_secondsの昇順）に並べてください。\n"
+            f"- セクションの開始時刻が動画全体に均等に分散するようにしてください。"
+            f"最後のセクションのstart_secondsは動画長（{video_duration_sec}秒）の50%以上にしてください。\n"
+            f"- 同じstart_secondsを複数のセクションに使わないでください。\n"
+            f"{extra_hint}"
+            f"\n字幕テキスト:\n{full_text}"
+        )
+
+        response = client.beta.chat.completions.parse(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format=_OutlineResult,
+        )
+        count_tokens(response)
+
+        outline = response.choices[0].message.parsed
+        if _validate_outline(outline, video_duration_sec):
+            print(f"  [Stage 1] {len(outline.sections)}セクションを検出")
+            return outline
+
+        last_start = outline.sections[-1].start_seconds if outline.sections else 0
+        print(f"  [Stage 1] アウトラインの分散が不均一です（試行{attempt+1}/{MAX_RETRIES}）。"
+              f" 最終セクション={last_start}秒 / 動画={video_duration_sec}秒")
+        extra_hint = (
+            f"【重要】前回の出力では最後のセクションのstart_secondsが{last_start}秒でした。"
+            f"動画長の50%（{video_duration_sec//2}秒）以上にしてください。後半にもセクションを設けてください。\n"
+        )
+
+    raise ValueError(f"Stage 1: {MAX_RETRIES}回試行してもアウトラインの分散が改善されませんでした。")
+
+
+def stage2_summarize_section(section: _Section, section_text: str,
+                              outline: _OutlineResult, title: str, idx: int) -> _SectionSummary:
+    """Stage 2: 1セクション分の字幕テキストを要約して _SectionSummary を返す"""
+    n = len(outline.sections)
+    outline_list = "\n".join(
+        f"{i+1}. {s.heading}（{_seconds_to_label(s.start_seconds)}〜）"
+        for i, s in enumerate(outline.sections)
+    )
+
+    end_sec = (outline.sections[idx + 1].start_seconds
+               if idx + 1 < n else None)
+    start_label = _seconds_to_label(section.start_seconds)
+    end_label = _seconds_to_label(end_sec) if end_sec else "動画終端"
+
+    system_prompt = (
+        "あなたは動画字幕のセクション要約スペシャリストです。\n"
+        "指定されたセクションの字幕を、内容を損なわず読みやすく要約します。\n"
+        "前のセクションで紹介された用語は再定義不要です。\n"
+        "文体は常体（だ・ます調ではなく）で書いてください。\n"
+        "ただし「〜である」を機械的に文末に付けないでください。\n"
+        "「〜する」「〜している」「〜なる」「〜だ」など、自然な常体の語尾を使い分けてください。"
+    )
+
+    user_prompt = (
+        f"動画「{title}」の要約を作成しています。\n"
+        f"以下は動画全体のアウトライン（全{n}セクション）です：\n\n"
+        f"{outline_list}\n\n"
+        f"今回はセクション{idx+1}「{section.heading}」（{start_label}〜{end_label}）を要約してください。\n\n"
+        f"【headingのルール】\n"
+        f"- このセクションの核心的な結論・主張を20〜40字の日本語一文で表してください。\n"
+        f"- 「〜であるため〜」「〜により〜」のように理由や結果を含めると良いです。\n"
+        f"- 話題のラベルではなく、このセクションで何が明らかになったかを書いてください。\n\n"
+        f"【summaryのルール】\n"
+        f"- このセクションの字幕テキストのみを要約してください。他のセクションの内容は含めないでください。\n"
+        f"- まず1文で、このセクションの最も重要な結論・事実を直接述べてください。\n"
+        f"  「本セクションでは〜が説明された」のようなメタ記述は避け、内容を直接書いてください。\n"
+        f"- その後、根拠・具体例・経緯を補足してください。\n"
+        f"  流れのある話は段落（複数文）でまとめる。並列的な独立事実は箇条書きで整理する。\n"
+        f"- 文の長さと改行は**読者が自然に読めるかどうか**を基準にしてください。\n"
+        f"  関連する内容は同じ文・同じ項目にまとめ、意味のないところで改行しないこと。\n"
+        f"  1つの箇条書き項目が長くなるなら、文章を整理して自然な長さに収めてください。\n"
+        f"- 元のテキストの重要な論拠、具体例、専門用語を保持してください。\n"
+        f"- 見出し行は不要です（呼び出し元が付けます）。\n"
+        f"- Markdown形式で出力してください。\n\n"
+        f"セクションの字幕テキスト:\n{section_text}"
+    )
+
+    response = client.beta.chat.completions.parse(
+        model=MODEL_NAME,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        response_format=_SectionSummary,
+    )
+    count_tokens(response)
+    return response.choices[0].message.parsed
+
+
+def stage2_summarize_all_parallel(vtt_entries, outline: _OutlineResult, title: str) -> list:
+    """Stage 2: 全セクションを ThreadPoolExecutor で並列要約する。
+
+    戻り値: セクション順に並んだ要約文字列のリスト
+    """
+    sections = outline.sections
+    n = len(sections)
+    results = [None] * n
+
+    def task(idx):
+        sec = sections[idx]
+        end_sec = sections[idx + 1].start_seconds if idx + 1 < n else float('inf')
+        section_text = build_section_text(vtt_entries, sec.start_seconds, end_sec)
+        summary = stage2_summarize_section(sec, section_text, outline, title, idx)
+        return idx, summary
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(task, i): i for i in range(n)}
+        for future in as_completed(futures):
+            try:
+                idx, summary = future.result()
+                results[idx] = summary
+                print(f"  [Stage 2] セクション {idx+1}/{n} 完了")
+            except Exception as e:
+                idx = futures[future]
+                print(f"  [Stage 2] セクション {idx+1}/{n} でエラー: {e}")
+                results[idx] = _SectionSummary(
+                    heading=sections[idx].heading,
+                    summary="（このセクションの要約を生成できませんでした）"
+                )
+
+    return results
+
+
+def assemble_markdown(outline: _OutlineResult, summaries: list, title: str) -> str:
+    """アウトラインとセクション要約から最終 Markdown を組み立てる。
+
+    見出しは Stage 2 が生成した結論を含む一行要約を使用する。
+    txt_to_html() が期待する形式:
+      ## タイトル
+      ### 見出し（動画：X分Y秒頃）
+      本文
+      以上
+    """
+    lines = [f"## {title}", ""]
+    for sec, result in zip(outline.sections, summaries):
+        label = _seconds_to_label(sec.start_seconds)
+        heading = result.heading if isinstance(result, _SectionSummary) else sec.heading
+        body = result.summary if isinstance(result, _SectionSummary) else (result or "")
+        lines.append(f"### {heading}（動画：{label}頃）")
+        lines.append(body)
+        lines.append("")
+    lines.append("以上")
+    return "\n".join(lines)
+
+
+def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, thumbnail_path=None, images_future=None):
+    """字幕ファイルを要約してHTMLを生成する（2段階方式）
+
+    images_future: concurrent.futures.Future を渡すと、HTML生成直前に
+                   images_future.result() → (images, thumbnail_path) として解決する。
+                   ストーリーボードダウンロードと要約を並列実行するために使用。
+    """
+    result_merged_txt = read_vtt(vtt)
     vtt_entries = parse_vtt_with_timestamps(result_merged_txt)
+    video_duration_sec = get_vtt_duration_in_seconds(result_merged_txt)
 
     print(f'要約中（モデル: {MODEL_NAME}）')
 
-    
-    add = (
-    "これは.vtt形式の字幕ファイルです。字幕の時刻を正確に解釈し、Markdownで要約してください。"
-    "時間の読み取りミスは重大なので、タイムスタンプは必ず正確に処理してください。\n"
-    "\n"
-    "【重要】タイムスタンプのルール：\n"
-    "- 各見出しには、その話題が実際に話された時刻を**必ず1つだけ**付けてください。\n"
-    "- 形式は「動画：*分*秒頃」とし、例として 00:16:27.182 は「動画：16分27秒頃」となります。\n"
-    "- **絶対に複数の時間を書かないでください**（例：「0分55秒頃／11分10秒頃」は禁止）。\n"
-    "- **同じ時間を複数の見出しに使わないでください**。各見出しは固有の時間を持つ必要があります。\n"
-    "- 見出しの時間は**時系列順（昇順）**に並べてください。後の見出しが前の見出しより早い時間になってはいけません。\n"
-    "- 同じ時間帯に複数の話題がある場合は、1つの見出しに統合するか、数秒ずらして区別してください。\n"
-    "- **「補足」「続き」などで過去の時間に戻る見出しは作らないでください**。要約は時系列順に進めてください。\n"
-    "- 補足情報は、その話題が最初に出てきた見出しの中に含めるか、省略してください。\n"
-    "- 総括・まとめセクションも、その話題が話された時刻（通常は動画の終盤）を1つだけ記載してください。\n"
-    "\n"
-    "【目的】このタイムスタンプは、見出しごとに字幕を分割表示するために使用します。\n"
-    "各見出しの時間から次の見出しの時間までの字幕が、その見出しに紐づけられます。\n"
-    "そのため、時間が正確で、時系列順であることが非常に重要です。\n"
-    "\n"
-    "タイムスタンプは字幕の全発話に機械的に付けず、"
-    "複数字幕をまとめた話題では、次の基準で最も代表的な時刻を1つ選んでください：\n"
-    "- その話題が明確に始まった時刻\n"
-    "- または、要点／結論が最初に示された時刻\n"
-    "\n"
-    "要約が長くなる場合は、動画全体の時間の流れを俯瞰し、"
-    "見出しが特定の時間帯に偏りすぎないように構成を調整してください。"
-    "同じ時間帯に話題が密集して見出しが増えすぎる場合は、"
-    "無理に細分化せず統合して、話題ごとの代表時刻が自然に分散するようにしてください。\n"
-    )
+    # ── Stage 1: アウトライン取得 ──────────────────────────────────────────
+    print('  [Stage 1] アウトライン生成中...')
+    outline = stage1_get_outline(vtt_entries, title, video_duration_sec)
 
-    add += f'タイトルは「{title}」を日本語に訳して使用してください。\n'
+    # ── Stage 2: セクション並列要約 ────────────────────────────────────────
+    print(f'  [Stage 2] {len(outline.sections)}セクションを並列要約中...')
+    summaries = stage2_summarize_all_parallel(vtt_entries, outline, title)
 
-    add += (
-        "手順や複数の項目を詳しく説明する場合、"
-        "タイムスタンプ付きの項目は必ず見出し（###または####）として記載してください。\n"
-        "タイムスタンプは見出しの末尾に括弧で含めてください（次の形式に統一）：\n"
-        "### 話題名（動画：*分*秒頃）\n"
-        "\n"
-        "例:\n"
-        "### 鱗の除去（動画：5分50秒頃）\n"
-        "スーパーの切り身は鱗が残っていることが多いので、食感を損ねないように丁寧に取り除く。\n\n"
-        "### 小骨の除去（動画：6分11秒頃）\n"
-        "中骨に沿って並ぶ小骨を丁寧に抜き取る。\n\n"
-        "このように、タイムスタンプを含む項目は見出しとして独立させ、"
-        "説明文は見出しの下に配置してください。"
-        "説明文がない場合でも、見出しだけは記載してください。\n"
-    )
+    # ── Markdown 組み立て ──────────────────────────────────────────────────
+    responseA_text = assemble_markdown(outline, summaries, title)
 
-    f1text = (
-        "あなたは、字幕ファイルから話された時間を正しく認識し、正確で読みやすい要約を作るスペシャリストです。"
-        "以下の内容を、日本語で、元の文章の**およそ1/2から2/3程度**の文字数を目安に、**詳細に要約**してMarkdown形式で出力してください"
-        "（ただし全体で1万字を超えないこと）。"
-        "文章は敬体ではなく常体で書いてください。"
-        "字幕には誤字が含まれている可能性があるため、文意に基づいて適切に修正してください。"
-        "内容を省略しすぎず、**結論に至るまでの主要な論拠や理由、具体的な事例、重要な専門用語**を記述し、情報量を充実させてください。"
-        "各話題の**結論だけでなく、その過程や背景**も残してください。"
-        "特に重要なポイントは、**箇条書き（リスト）**を積極的に利用して整理してください。"
-        "文字数が増えても、話題の結論まで書いてください。"
-        "一目で構造が把握できるように、見出し（大見出し・小見出し）を適切に付けてください。"
-        "見出しだけ読んでも、内容の流れがわかるように工夫してください。"
-        "内容が多すぎる場合は最初から計画して見出しを分割したり、適切に改行や段落分けを行って、読みやすい文章にしてください。"
-        f"{add}"
-        "この指示への返答は不要です。出力は内容のみを表示し、最後に「以上」と記載してください。\n\n"
-    )
-
-
-    f1text += '\n'.join(result_merged_txt)
-
-    # OpenAI APIでチャット履歴を管理
-    messages = []
-
-    while True:
-        # 最初のメッセージを送信
-        messages = [{"role": "user", "content": f1text}]
-
-        responseA = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=messages
-        )
-
-        # トークン数を記録
-        in_tok, out_tok = count_tokens(responseA)
-        print(f"  要約: 入力 {in_tok:,} / 出力 {out_tok:,} トークン")
-
-        responseA_text = responseA.choices[0].message.content
-
-        #見出しの時間が良い分散になっているかを確認
-        if judge_good_time_split(responseA_text.split('\n'), result_merged_txt):
-            # 成功したらアシスタントの応答を履歴に追加
-            messages.append({"role": "assistant", "content": responseA_text})
-            break  # 成功したらループ終了
-        else:
-            print('分散が悪いので、再度要約を実行します。')
-            # 不適切なら新しくセッションを作り直す（messagesをリセット）
-
-    # 回答を踏まえた次の質問
-    messages.append({
-        "role": "user",
-        "content": "では、その内容の興味深いポイントをまとめて。200文字程度で日本語で。「動画のポイント」という見出しを付けて。この講演に興味を持つ人が特記したいような内容を。全般的でなくとも、特徴的な点を。またこっちは文末に「以上」は不要。"
-    })
+    # ── ハイライト生成 ─────────────────────────────────────────────────────
+    print('  [Highlights] ポイント生成中...')
+    highlights_messages = [
+        {"role": "user", "content": f"以下は動画「{title}」の要約です。\n\n{responseA_text}"},
+        {"role": "assistant", "content": "要約を確認しました。"},
+        {
+            "role": "user",
+            "content": "では、その内容の興味深いポイントをまとめて。200文字程度で日本語で。「動画のポイント」という見出しを付けて。この講演に興味を持つ人が特記したいような内容を。全般的でなくとも、特徴的な点を。またこっちは文末に「以上」は不要。"
+        },
+    ]
 
     responseB = client.chat.completions.create(
         model=MODEL_NAME,
-        messages=messages
+        messages=highlights_messages
     )
 
-    # トークン数を記録
     in_tok, out_tok = count_tokens(responseB)
     print(f"  ポイント: 入力 {in_tok:,} / 出力 {out_tok:,} トークン")
 
     responseB_text = responseB.choices[0].message.content
 
     result = responseB_text.split('\n') + ['\n'] + [url_base] + responseA_text.split('\n')
+
+    # ストーリーボードの並列ダウンロードが完了するまで待機
+    if images_future is not None:
+        print('  [Images] ストーリーボードの完了を待機中...')
+        images, thumbnail_path = images_future.result()
 
     # HTMLファイルを生成
     txt_to_html(result, output_html_path, url_base, images, detail_text, thumbnail_path, vtt_entries)
@@ -779,7 +972,7 @@ def generate_detail_text(vtt_content, title):
         print(f"詳細テキスト生成でエラーが発生しました: {str(e)}")
         return None
 
-def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=False, thumbnail_path=None):
+def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=False, thumbnail_path=None, images_future=None):
     """
     VTTファイルを要約してHTMLを生成する
 
@@ -815,7 +1008,7 @@ def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=Fal
         vtt_content = read_vtt(vtt)
         detail_text = generate_detail_text(vtt_content, title)
     
-    yoyaku_gemini(vtt, title, html_path, images, detail_text, thumbnail_path)
+    yoyaku_gemini(vtt, title, html_path, images, detail_text, thumbnail_path, images_future=images_future)
 
     # トークン使用量サマリーを表示
     print_token_summary()

@@ -3,6 +3,7 @@ import os
 import pyperclip
 import sys
 import requests
+from concurrent.futures import ThreadPoolExecutor
 #import subprocess
 from youtube_transcript_api import YouTubeTranscriptApi
 from ret_youyaku_html import do as create_summary
@@ -517,16 +518,16 @@ def process_video(url):
         try:
             video_url = f"https://www.youtube.com/watch?v={video_id}&t="
 
-            # 画像をダウンロードしてスライス（サムネイルも同時取得）
-            print("\nストーリーボード画像とサムネイルの処理を開始...")
-            images, thumbnail_path = dl_images(url, images_dir, output_dir)
-
             # 詳細モードかどうかを確認
             detail_mode = is_detail_mode()
             if detail_mode:
                 print("詳細モードで実行中...")
 
-            html_path = create_summary(result, video_title, output_dir, video_url, images, detail_mode, thumbnail_path)
+            # ストーリーボードを裏で並列ダウンロードしながら要約を実行
+            print("\nストーリーボード画像とサムネイルのダウンロードを開始（要約と並列実行）...")
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                images_future = executor.submit(dl_images, url, images_dir, output_dir)
+                html_path = create_summary(result, video_title, output_dir, video_url, images_future=images_future, detail_mode=detail_mode)
             print(f"要約HTMLが作成されました: {html_path}")
             
             # VTTファイルを削除
