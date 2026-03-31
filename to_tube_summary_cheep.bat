@@ -3,8 +3,9 @@ chcp 65001 > nul
 echo === YouTube字幕ダウンローダー（安価版） ===
 echo クリップボードのURLから字幕を取得します...
 
-:: モデル名を環境変数で設定（安価なminiモデル）
-set OPENAI_MODEL=gpt-5-mini-2025-08-07
+:: モデル名を環境変数で設定
+set OPENAI_MODEL_STAGE1=gpt-5.4-mini-2026-03-17
+set OPENAI_MODEL_STAGE2=gpt-5.4-nano-2026-03-17
 
 :: 仮想環境のPythonを使用
 .\.venv\Scripts\python.exe youtube_transcript_downloader.py --from-bat

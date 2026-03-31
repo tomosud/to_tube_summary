@@ -65,6 +65,9 @@ client = OpenAI(api_key=apikey)
 
 # 使用するモデル（環境変数から取得、デフォルトはgpt-5.2）
 MODEL_NAME = os.environ.get('OPENAI_MODEL', 'gpt-5.2-2025-12-11')
+# Stage 1（分散指示）/ Stage 2（heading指示）で別モデルを使用可能
+MODEL_STAGE1 = os.environ.get('OPENAI_MODEL_STAGE1', MODEL_NAME)
+MODEL_STAGE2 = os.environ.get('OPENAI_MODEL_STAGE2', MODEL_NAME)
 
 # トークン使用量の累計
 total_usage = {'input': 0, 'output': 0}
@@ -288,7 +291,7 @@ def stage1_get_outline(vtt_entries, title: str, video_duration_sec: int) -> _Out
         )
 
         response = client.beta.chat.completions.parse(
-            model=MODEL_NAME,
+            model=MODEL_STAGE1,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -368,7 +371,7 @@ def stage2_summarize_section(section: _Section, section_text: str,
     )
 
     response = client.beta.chat.completions.parse(
-        model=MODEL_NAME,
+        model=MODEL_STAGE2,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -451,7 +454,7 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, t
     vtt_entries = parse_vtt_with_timestamps(result_merged_txt)
     video_duration_sec = get_vtt_duration_in_seconds(result_merged_txt)
 
-    print(f'要約中（モデル: {MODEL_NAME}）')
+    print(f'要約中（Stage1: {MODEL_STAGE1} / Stage2: {MODEL_STAGE2}）')
 
     # ── Stage 1: アウトライン取得 ──────────────────────────────────────────
     print('  [Stage 1] アウトライン生成中...')
