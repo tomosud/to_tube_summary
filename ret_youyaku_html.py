@@ -3,13 +3,12 @@ import re
 import json
 import shutil
 import glob
+import hashlib
 import urllib.parse
 from openai import OpenAI
 import tkinter as tk
 from tkinter import simpledialog
 
-# テンプレートのバージョン（template/index.html の <meta name="template-version"> と一致させる）
-TEMPLATE_VERSION = 7
 # テンプレートファイルのパス
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template')
 TEMPLATE_HTML = os.path.join(TEMPLATE_DIR, 'index.html')
@@ -830,24 +829,25 @@ def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=Fal
 
 # ====================== テンプレート自動更新 ====================== #
 
-def get_template_version_from_html(html_path):
-    """HTMLファイルからテンプレートバージョンを読み取る"""
+def _file_hash(path):
+    """ファイルのSHA256ハッシュを返す。存在しなければNone。"""
     try:
-        with open(html_path, 'r', encoding='utf-8') as f:
-            content = f.read(2048)  # 先頭部分だけ読む
-        m = re.search(r'<meta\s+name=["\']template-version["\']\s+content=["\'](\d+)["\']', content)
-        if m:
-            return int(m.group(1))
+        with open(path, 'rb') as f:
+            return hashlib.sha256(f.read()).hexdigest()
     except Exception:
-        pass
-    return None
+        return None
 
 
 def update_templates(base_dir):
     """base_dir 以下の全フォルダの index.html テンプレートを最新版に更新する。
     data.js が存在するフォルダのみ対象（新フォーマット済み）。
+    テンプレートの内容ハッシュで比較するため、バージョン番号の管理は不要。
     """
     if not os.path.isdir(base_dir):
+        return
+
+    template_hash = _file_hash(TEMPLATE_HTML)
+    if template_hash is None:
         return
 
     updated = 0
@@ -859,13 +859,12 @@ def update_templates(base_dir):
         index_html = os.path.join(folder_path, 'index.html')
         if not os.path.exists(data_js):
             continue  # 旧フォーマット or 無関係フォルダ → スキップ
-        ver = get_template_version_from_html(index_html)
-        if ver is None or ver < TEMPLATE_VERSION:
+        if _file_hash(index_html) != template_hash:
             shutil.copy2(TEMPLATE_HTML, index_html)
             updated += 1
 
     if updated:
-        print(f"🔄 テンプレート更新: {updated} フォルダの index.html を v{TEMPLATE_VERSION} に更新しました")
+        print(f"🔄 テンプレート更新: {updated} フォルダの index.html を更新しました")
 
 
 # ====================== 既存データ移行 ====================== #
