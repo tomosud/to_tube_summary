@@ -404,11 +404,16 @@ def stage2_summarize_all_parallel(vtt_entries, outline: _OutlineResult, title: s
                 print(f"  [Stage 2] セクション {idx+1}/{n} 完了")
             except Exception as e:
                 idx = futures[future]
-                print(f"  [Stage 2] セクション {idx+1}/{n} でエラー: {e}")
-                results[idx] = _SectionSummary(
-                    heading=sections[idx].heading,
-                    summary="（このセクションの要約を生成できませんでした）"
-                )
+                print(f"  [Stage 2] セクション {idx+1}/{n} でエラー: {e} → リトライ中...")
+                try:
+                    _, results[idx] = task(idx)
+                    print(f"  [Stage 2] セクション {idx+1}/{n} リトライ成功")
+                except Exception as e2:
+                    print(f"  [Stage 2] セクション {idx+1}/{n} リトライ失敗: {e2}")
+                    results[idx] = _SectionSummary(
+                        heading=sections[idx].heading,
+                        summary="（このセクションの要約を生成できませんでした）"
+                    )
 
     return results
 
