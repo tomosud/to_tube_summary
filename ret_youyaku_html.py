@@ -190,11 +190,11 @@ def _seconds_to_label(sec: int) -> str:
     return f"{m}分{s}秒"
 
 
-def build_section_text(vtt_entries, start_sec: int, end_sec: int) -> str:
-    """指定時間範囲の字幕テキストを抽出し、約60秒ごとに[MM:SS]マーカーを挿入して返す。
+def build_section_text(vtt_entries, start_sec: int, end_sec: int, timestamps: bool = True) -> str:
+    """指定時間範囲の字幕テキストを抽出して返す。
 
-    get_subtitle_for_range() と同じ重複除去ロジックを使用するが、
-    モデルへの時間アンカーとして [MM:SS] マーカーを挿入する点が異なる。
+    timestamps=True のとき約60秒ごとに [MM:SS] マーカーを挿入する（Stage 1用）。
+    timestamps=False のときテキストのみ返す（Stage 2用）。
     """
     texts = []
     last_marker_sec = -999
@@ -205,8 +205,7 @@ def build_section_text(vtt_entries, start_sec: int, end_sec: int) -> str:
         if entry_start >= end_sec:
             break
 
-        # 約60秒ごとに時刻マーカーを挿入
-        if entry_start - last_marker_sec >= 60:
+        if timestamps and entry_start - last_marker_sec >= 60:
             m, s = divmod(int(entry_start), 60)
             texts.append(f"[{m:02d}:{s:02d}]")
             last_marker_sec = entry_start
@@ -272,14 +271,14 @@ def stage1_get_outline(vtt_entries, title: str, video_duration_sec: int) -> _Out
     for attempt in range(MAX_RETRIES):
         user_prompt = (
             f"以下は動画「{title}」の字幕テキストです（[MM:SS]形式の時刻マーカーが約60秒ごとに含まれています）。\n"
-            f"字幕の流れを分析し、話題の切れ目でセクションに分割してください。\n\n"
+            f"この動画にチャプターを付けるつもりで、話題の切れ目でセクションを区切ってください。\n\n"
             f"【ルール】\n"
             f"- セクション数は動画の長さに応じて5〜20個程度にしてください（動画時間: 約{duration_min}分）。\n"
             f"- headingは日本語で、その話題を端的に表す20字以内のタイトルにしてください。\n"
             f"- start_secondsは、そのセクションの話題が始まる秒数を整数で指定してください（[MM:SS]マーカーを参考にしてください）。\n"
             f"- セクションは必ず時系列順（start_secondsの昇順）に並べてください。\n"
-            f"- セクションの開始時刻が動画全体に均等に分散するようにしてください。"
-            f"最後のセクションのstart_secondsは動画長（{video_duration_sec}秒）の50%以上にしてください。\n"
+            f"- チャプターが動画の前半に集中しないようにしてください。動画の前半・中盤・後半にそれぞれチャプターが存在するよう分布させてください。\n"
+            f"  後半に長い話題がある場合も、内容の切れ目があれば適切に分割してください。\n"
             f"- 同じstart_secondsを複数のセクションに使わないでください。\n"
             f"{extra_hint}"
             f"\n字幕テキスト:\n{full_text}"
@@ -340,18 +339,20 @@ def stage2_summarize_section(section: _Section, section_text: str,
         f"{outline_list}\n\n"
         f"今回はセクション{idx+1}「{section.heading}」（{start_label}〜{end_label}）を要約してください。\n\n"
         f"【headingのルール】\n"
-        f"- このセクションの核心的な結論・主張を20〜40字の日本語一文で表してください。\n"
-        f"- 「〜であるため〜」「〜により〜」のように理由や結果を含めると良いです。\n"
-        f"- 話題のラベルではなく、このセクションで何が明らかになったかを書いてください。\n\n"
+        f"- 「何についての話か」＋「その結論・評価」を20〜40字の一文で表してください。\n"
+        f"- 商品・人物・技術の紹介や評価が中心の内容では、対象の名前や種別を先に示し、続けて結論・評価を書いてください。\n"
+        f"  例：「○○（商品名）は旨味はあるが塩気が強くそのままではしょっぱめ」\n"
+        f"- 議論・解説・手順など対象が明確でない場合は、何が明らかになったかを結論として書いてください。\n"
+        f"- 単なるトピックラベル（「○○の紹介」「○○について」）にはしないでください。\n\n"
         f"【summaryのルール】\n"
         f"- このセクションの字幕テキストのみを要約してください。他のセクションの内容は含めないでください。\n"
+        f"- **文字数の目安：字幕テキストの約半分（{len(section_text)//2}字程度）**。重要な内容を選んで簡潔にまとめてください。\n"
         f"- まず1文で、このセクションの最も重要な結論・事実を直接述べてください。\n"
         f"  「本セクションでは〜が説明された」のようなメタ記述は避け、内容を直接書いてください。\n"
         f"- その後、根拠・具体例・経緯を補足してください。\n"
         f"  流れのある話は段落（複数文）でまとめる。並列的な独立事実は箇条書きで整理する。\n"
         f"- 文の長さと改行は**読者が自然に読めるかどうか**を基準にしてください。\n"
         f"  関連する内容は同じ文・同じ項目にまとめ、意味のないところで改行しないこと。\n"
-        f"  1つの箇条書き項目が長くなるなら、文章を整理して自然な長さに収めてください。\n"
         f"- 元のテキストの重要な論拠、具体例、専門用語を保持してください。\n"
         f"- 見出し行は不要です（呼び出し元が付けます）。\n"
         f"- Markdown形式で出力してください。\n\n"
@@ -382,7 +383,7 @@ def stage2_summarize_all_parallel(vtt_entries, outline: _OutlineResult, title: s
     def task(idx):
         sec = sections[idx]
         end_sec = sections[idx + 1].start_seconds if idx + 1 < n else float('inf')
-        section_text = build_section_text(vtt_entries, sec.start_seconds, end_sec)
+        section_text = build_section_text(vtt_entries, sec.start_seconds, end_sec, timestamps=False)
         summary = stage2_summarize_section(sec, section_text, outline, title, idx)
         return idx, summary
 
