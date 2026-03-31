@@ -1,204 +1,124 @@
-# YouTube動画要約ツール
+# YouTube 要約ツール
 
-Windowsで動作するYouTube動画の要約ツール。YouTubeのURLをクリップボードにコピーして実行すると、動画の字幕を取得・要約し、タイムスタンプ付きのHTMLページを生成する。
+Windows で YouTube 動画の URL から字幕を取得し、OpenAI API で要約して、ブラウザで読める HTML ページを生成するツールです。
 
-要約にはOpenAI APIを使用する。YouTubeのストーリーボードからサムネイル画像もスライスして配置する。
+生成されるページには、要約本文だけでなく、動画リンク、字幕、サムネイル、ストーリーボード画像も含まれます。必要に応じて、通常要約、低コスト要約、詳細要約を使い分けられます。
 
-![image](https://github.com/user-attachments/assets/51177fbd-f2d7-4e65-a5b6-998de72b5376)
+## できること
 
+- YouTube URL から字幕を取得する
+- 字幕をもとに章立て付きの要約を作る
+- 章ごとに動画の該当位置へ飛べるようにする
+- 字幕と対応した画像を HTML に埋め込む
+- 詳細モードでは長めの解説も追加する
 
-## 必要なもの
+## 動作環境
 
-- Windows 10/11
-- Python 3.8以上
-- OpenAIのAPIキー
-  - 初回実行時にダイアログで入力を求められ、`api_key.txt`に保存される
-  - 変更したい場合は`api_key.txt`を削除して再実行
+- Windows
+- Python
+- OpenAI API キー
 
 ## セットアップ
 
-1. このリポジトリをクローンまたはダウンロード
-2. `setup.bat`を実行（Python仮想環境の作成と依存パッケージのインストール）
+1. このフォルダを開きます。
+2. `setup.bat` を実行します。
+3. 仮想環境の作成と必要パッケージのインストールが完了すれば準備完了です。
 
+OpenAI API キーは初回実行時に入力を求められ、`api_key.txt` に保存されます。
 
 ## 使い方
 
-1. YouTubeの動画ページでURLをコピー（クリップボード）
-2. 以下のいずれかのバッチファイルを実行
+1. YouTube 動画の URL をコピーします。
+2. 次のいずれかの bat を実行します。
 
-| ファイル名 | モデル | 説明 |
-|-----------|--------|------|
-| `to_tube_summary.bat` | gpt-5.2-2025-12-11 | 標準版 |
-| `to_tube_summary_detail.bat` | gpt-5.2-2025-12-11 | 詳細版（要約＋字幕全文整形） |
-| `to_tube_summary_cheep.bat` | gpt-5-mini-2025-08-07 | 安価版（軽量モデル） |
+| ファイル | 用途 |
+| --- | --- |
+| `to_tube_summary.bat` | 通常の要約を作る |
+| `to_tube_summary_cheep.bat` | コストを抑えて要約を作る |
+| `to_tube_summary_detail.bat` | 通常要約に加えて詳細解説も作る |
 
-### 別モデルのバッチを追加する
+実行時の動きは次の通りです。
 
-既存batをコピーし、`set OPENAI_MODEL=` の行を変更する。詳細モードは末尾に `--detail` を追加。
+- クリップボードに URL があればそれを使います
+- URL がなければ手入力を求めます
+- 処理完了後、生成した `index.html` をブラウザで開きます
 
+## 実装の流れ
 
-## 出力構成
+処理はおおむね次の順です。
 
-生成されるファイルは `C:\temp\html\[動画タイトル]\` に保存される。
+1. YouTube URL から動画 ID を取り出す
+2. 動画タイトルを取得し、出力フォルダを作る
+3. 字幕を取得して `.vtt` ファイルとして保存する
+4. 動画メタ情報、サムネイル、ストーリーボード画像を取得する
+5. OpenAI API で章立てと各章の要約を作る
+6. 必要なら詳細解説も追加生成する
+7. 要約結果を `data.js` と `index.html` に変換する
+8. 生成ページをブラウザで開く
 
-```
-[動画タイトル]/
-├── index.html        ← 汎用テンプレート（全動画共通）
-├── data.js           ← 動画固有データ（URL、セクション、画像パス、字幕等）
-├── index.html.txt    ← 要約のMarkdownテキスト（生テキスト保存）
-├── info.json         ← 動画メタ情報（タイトル、チャンネル、投稿日等）
-├── Thumbnail.jpg     ← 動画サムネイル
-├── [タイトル].vtt    ← 字幕ファイル
-└── images/           ← ストーリーボードからスライスした画像
-```
+字幕は日本語を優先し、なければ自動生成字幕や英語字幕を使います。該当字幕が見つからない動画は処理できません。
 
-### index.html と data.js の分離構造
+## 生成されるファイル
 
-出力HTMLは **汎用テンプレート `index.html`** と **動画固有データ `data.js`** に分離されている。
+出力先は `C:\temp\html\[動画タイトル]\` です。
 
-- `index.html` は `template/index.html` のコピーで、全動画で同一ファイル
-- `data.js` は `var PAGE_DATA = { ... };` 形式で動画ごとのデータを格納
-- `index.html` は `<script src="data.js">` でデータを読み込むため、`file://` でもスタンドアロンで動作する
+主な生成物は次の通りです。
 
-**data.js のスキーマ:**
+- `index.html`
+  要約ページ本体です。テンプレート HTML をコピーして使います。
+- `data.js`
+  動画ごとの要約、章、字幕、画像パスなどのデータです。
+- `index.html.txt`
+  要約の元になったテキストです。
+- `info.json`
+  動画タイトル、チャンネル、URL などのメタ情報です。
+- `Thumbnail.jpg`
+  動画サムネイルです。
+- `*.vtt`
+  取得した字幕です。
+- `images/`
+  ストーリーボードから切り出した画像です。
 
-```js
-var PAGE_DATA = {
-  schema_version: 1,          // データスキーマバージョン
-  video_id: "oza36AqcLW8",
-  url: "https://www.youtube.com/watch?v=oza36AqcLW8",  // 正規YouTube URL
-  thumbnail: "Thumbnail.jpg",
-  sections: [
-    {
-      heading: "セクションタイトル（動画：5分30秒頃）",
-      level: 2,
-      timestamp: 330,          // 秒数。null if なし
-      body: "<p>本文HTML</p>", // Markdown→HTML変換済み
-      images: [{ src: "images/xxx.jpg", start: 300, end: 330 }],
-      subtitle: "字幕テキスト" // 生テキスト。null if なし
-    }
-  ],
-  detail: "<h2>...</h2>..."    // 詳細モード時のみ。null if なし
-};
-```
+## 生成ページの内容
 
-**設計方針:**
-- `url` には正規YouTube URL（`www.youtube.com`）を保持する。プロキシURL（`yout-ube.com` 等）への変換はテンプレート側の `CONFIG.proxyDomain` で行う
-- ChatGPTリンクの生成もテンプレート側で行う
-- `body` はPython側でMarkdown→HTML変換済みの状態で格納する
-- `schema_version` でデータの後方互換性を管理する。テンプレートは未知フィールドを無視し、欠損フィールドにはデフォルト値を使う
+生成された HTML では次の内容を見られます。
 
-### 動画の埋め込みについて
+- 動画のサムネイル
+- 章ごとの要約
+- 章ごとの動画リンク
+- 章に対応する画像一覧
+- 折りたたみ式の字幕テキスト
+- 字幕を ChatGPT に渡すためのリンク
+- 詳細モード時の追加解説
 
-テンプレートでは動画リンクにプロキシドメイン `yout-ube.com` を使用している。
+## 使っている API / ライブラリ
 
-- **iframe embed (`youtube-nocookie.com/embed/`)**: エラー153で再生不可のため不採用
-- **採用方式**: `https://www.yout-ube.com/watch?v={id}&t={秒数}` の通常URLをiframeで埋め込み。`autoplay` や `mute` パラメータは効かないため付与しない
+利用者目線で主要なものは次の通りです。
 
-### サムネイルの動作
+- OpenAI API
+  字幕から章立て、要約、ハイライト、詳細解説を生成します。
+- `youtube-transcript-api`
+  YouTube 字幕を取得します。
+- `yt-dlp`
+  動画メタ情報、サムネイル、ストーリーボード画像の取得に使います。
+- `requests`
+  Web ページや画像の取得に使います。
+- `Pillow`
+  ストーリーボード画像の切り出しに使います。
 
-各セクションの画像グリッドは以下の挙動で動作する:
+## 関連ファイル
 
-1. **通常状態**: ストーリーボードからスライスしたサムネイル画像を6列グリッドで表示。▶マーク付き
-2. **ホバー**: サムネイルが1.8倍に拡大（`transform: scale(1.8)`）
-3. **クリック**: サムネイルが非表示になり、その場にiframeが埋め込まれて動画再生が始まる。該当タイムスタンプ（`&t=秒数`）から再生される
-4. **ホバー外れる**: iframeを破棄して再生停止。サムネイルが元のサイズで復帰する
+- `setup.bat`
+  仮想環境の作成と依存パッケージのインストールを行います。
+- `youtube_transcript_downloader.py`
+  エントリ本体です。URL 受付、字幕取得、画像取得、要約処理の起動を行います。
+- `ret_youyaku_html.py`
+  OpenAI API を使った要約生成と HTML 出力を担当します。
+- `template/index.html`
+  生成ページの共通テンプレートです。
 
-**YouTube UI肥大化問題への対策:**
-サムネイルが小さいグリッド表示のため、iframe内のYouTube UI（チャンネルリンク、タイトル等）が相対的に大きくなり再生ボタンが押せなくなる問題がある。これに対し、iframeを実際の表示領域の2倍サイズ（`width:200%; height:200%`）で描画し、`transform: scale(0.5)` + `transform-origin: top left` で縮小表示することで、YouTube側には大きな画面サイズとして認識させ、UIが適切なサイズになるようにしている。
+## 補足
 
-**検証用ページ:**
-`sample/playtest/index.html` に各方式の比較テストページがある。セクション10が採用された方式。
+過去の古い HTML 出力を現在形式に変換したい場合は `migrate.bat` を使えます。
 
-
-## テンプレートの更新（バージョン管理）
-
-`template/index.html` には `<meta name="template-version" content="N">` が埋め込まれている。
-
-### 自動更新の仕組み
-
-ツール実行のたびに `C:\temp\html` 以下の全フォルダをスキャンし、`data.js` が存在するフォルダで `index.html` のテンプレートバージョンが古い場合、最新テンプレートで自動的に上書きする。`data.js` は一切変更されない。
-
-### テンプレートを変更する手順
-
-1. `template/index.html` を編集（CSS、JS、レイアウト等）
-2. `<meta name="template-version" content="N">` の `N` をインクリメント
-3. `ret_youyaku_html.py` の `TEMPLATE_VERSION` を同じ値に更新
-4. 次にツールを実行すると、過去の全フォルダの `index.html` が自動更新される
-
-### 手動で全フォルダを更新する
-
-ツールを実行せずにテンプレートだけ更新したい場合:
-
-```
-python -c "from ret_youyaku_html import update_templates; update_templates(r'C:\temp\html')"
-```
-
-
-## 既存データの移行
-
-旧フォーマット（モノリシックHTML）から新フォーマット（data.js + index.html）への移行:
-
-```
-migrate.bat
-```
-
-- `data.js` が存在しないフォルダを対象に、`.html.txt`（生テキスト）/ `info.json` / `images/` / `.vtt` から `data.js` を再生成する
-- 旧HTMLファイルは `.html.bak` にリネームされる（削除はされない）
-- 一度だけの実行で完了する。以降は自動更新のみ
-
-
-## 配布（GitHub Pages）
-
-`C:\work\script\tube_pages` で GitHub Pages への配布を行っている。
-
-### ワークフロー
-
-1. `to_tube_summary` で生成されたフォルダを `tube_pages/pages/htmls/` に手動コピー
-2. `tube_pages/pages/build.bat` を実行（`pages.json` を再生成）
-3. `tube_pages/push.bat` で GitHub Pages にデプロイ
-
-### tube_pages との互換性
-
-- `tube_pages/pages/build.py` はフォルダ内の最初の `.html` ファイルを検出する
-- ファイル名が `index.html` に変わっても動作に影響はない
-- `tube_pages` 側の変更は不要
-- テンプレート更新後は、`tube_pages/pages/htmls/` 内のフォルダにも手動で最新 `index.html` をコピーするか、以下を実行:
-  ```
-  python -c "from ret_youyaku_html import update_templates; update_templates(r'C:\work\script\tube_pages\pages\htmls')"
-  ```
-
-
-## 技術仕様
-
-### 依存パッケージ（requirements.txt）
-
-| パッケージ | 用途 |
-|-----------|------|
-| youtube-transcript-api | 字幕取得 |
-| yt-dlp | ストーリーボード・サムネイル取得 |
-| openai | OpenAI API クライアント |
-| Pillow | 画像処理（ストーリーボードのスライス） |
-| pyperclip | クリップボード操作 |
-| requests | HTTP通信 |
-
-### ファイル構成
-
-| ファイル | 役割 |
-|---------|------|
-| `youtube_transcript_downloader.py` | メインエントリポイント。字幕取得・ストーリーボード処理・要約呼び出し |
-| `ret_youyaku_html.py` | OpenAI APIで要約生成、data.js + テンプレート出力、テンプレート更新・移行機能 |
-| `template/index.html` | 汎用HTMLテンプレート（バージョン管理付き） |
-| `migrate.bat` | 旧フォーマットからの一括移行 |
-| `api_key.txt` | OpenAI APIキー（.gitignore対象） |
-
-### モデル設定
-
-環境変数 `OPENAI_MODEL` でモデルを切り替え可能（デフォルト: `gpt-5.2-2025-12-11`）。
-
-
-## 注意事項
-
-- 字幕のある動画のみ対応（英語・日本語優先、他の言語もフォールバックで対応）
-- 処理時間・APIコストは動画の長さに依存する
-- `api_key.txt` は `.gitignore` に設定済み。外部に公開しないこと
+`api_key.txt` は `.gitignore` 対象です。リポジトリに含めない前提で使ってください。
