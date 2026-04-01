@@ -496,7 +496,7 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, t
         images, thumbnail_path = images_future.result()
 
     # HTMLファイルを生成
-    txt_to_html(result, output_html_path, url_base, images, detail_text, thumbnail_path, vtt_entries)
+    txt_to_html(result, output_html_path, url_base, images, detail_text, thumbnail_path, vtt_entries, title)
 
 def extract_timestamp(line):
     """行から時間情報を抽出する"""
@@ -630,7 +630,7 @@ def markdown_to_html(text):
     
     return '\n'.join(html_lines)
 
-def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_text=None, thumbnail_path=None, vtt_entries=None):
+def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_text=None, thumbnail_path=None, vtt_entries=None, title: str = ""):
     """Markdown ライクなテキストを data.js + index.html に変換
 
     従来のモノリシックHTML生成の代わりに:
@@ -790,6 +790,7 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
     # ---------------------- PAGE_DATA を構築 ---------------------- #
     page_data = {
         "schema_version": 1,
+        "title": title,
         "video_id": video_id,
         "url": urlbase,
         "thumbnail": thumbnail_rel,
