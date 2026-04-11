@@ -31,13 +31,16 @@ TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templat
 TEMPLATE_HTML = os.path.join(TEMPLATE_DIR, 'index.html')
 
 def get_api_key():
-    """APIキーを取得または設定する"""
-    api_key_file = "api_key.txt"
+    """APIキーを取得または設定する（DPAPI暗号化）"""
+    import win32crypt
+    api_key_file = "localsettings.bin"
 
-    # ファイルが存在する場合はそこからAPIキーを読み込む
+    # 暗号化ファイルが存在する場合は復号して返す
     if os.path.exists(api_key_file):
-        with open(api_key_file, "r") as f:
-            return f.read().strip()
+        with open(api_key_file, "rb") as f:
+            encrypted = f.read()
+        _, decrypted = win32crypt.CryptUnprotectData(encrypted, None, None, None, 0)
+        return decrypted.decode("utf-8").strip()
 
     # ファイルが存在しない場合はダイアログを表示して入力を求める
     root = tk.Tk()
@@ -45,14 +48,17 @@ def get_api_key():
 
     api_key = simpledialog.askstring(
         "API Key 設定",
-        "OpenAI APIキーを入力してください：\n（入力されたキーはapi_key.txtに保存されます）"
+        "OpenAI APIキーを入力してください：\n（入力されたキーはapi_key.binに暗号化して保存されます）"
     )
 
     if api_key:
-        # APIキーをファイルに保存
-        with open(api_key_file, "w") as f:
-            f.write(api_key)
-        return api_key
+        # APIキーをWindowsユーザーに紐付けて暗号化して保存
+        encrypted = win32crypt.CryptProtectData(
+            api_key.strip().encode("utf-8"), None, None, None, None, 0
+        )
+        with open(api_key_file, "wb") as f:
+            f.write(encrypted)
+        return api_key.strip()
     else:
         raise ValueError("APIキーが設定されていません。")
 

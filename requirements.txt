@@ -4,3 +4,4 @@ yt-dlp
 Pillow
 requests
 openai
+pywin32
