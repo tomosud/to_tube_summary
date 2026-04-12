@@ -262,7 +262,7 @@ def _validate_outline(outline: _OutlineResult, video_duration_sec: int) -> bool:
     return True
 
 
-def stage1_get_outline(vtt_entries, title: str, video_duration_sec: int) -> _OutlineResult:
+def stage1_get_outline(vtt_entries, title: str, video_duration_sec: int, description: str = None) -> _OutlineResult:
     """Stage 1: VTT全体からセクションのアウトライン（見出し＋開始秒数）を取得する。
 
     Structured Outputs を使用して _OutlineResult を返す。
@@ -281,9 +281,14 @@ def stage1_get_outline(vtt_entries, title: str, video_duration_sec: int) -> _Out
     MAX_RETRIES = 3
     extra_hint = ""
     for attempt in range(MAX_RETRIES):
+        desc_block = (
+            f"\n【動画のDescription（参考情報）】\n{description}\n"
+            if description else ""
+        )
         user_prompt = (
             f"以下は動画「{title}」の字幕テキストです（[MM:SS]形式の時刻マーカーが約60秒ごとに含まれています）。\n"
-            f"この動画にチャプターを付けるつもりで、話題の切れ目でセクションを区切ってください。\n\n"
+            f"この動画にチャプターを付けるつもりで、話題の切れ目でセクションを区切ってください。\n"
+            f"{desc_block}\n"
             f"【ルール】\n"
             f"- セクション数は動画の長さに応じて5〜20個程度にしてください（動画時間: 約{duration_min}分）。\n"
             f"- headingは日本語で、その話題を端的に表す20字以内のタイトルにしてください。\n"
@@ -323,7 +328,7 @@ def stage1_get_outline(vtt_entries, title: str, video_duration_sec: int) -> _Out
 
 
 def stage2_summarize_section(section: _Section, section_text: str,
-                              outline: _OutlineResult, title: str, idx: int) -> _SectionSummary:
+                              outline: _OutlineResult, title: str, idx: int, description: str = None) -> _SectionSummary:
     """Stage 2: 1セクション分の字幕テキストを要約して _SectionSummary を返す"""
     n = len(outline.sections)
     outline_list = "\n".join(
@@ -345,10 +350,15 @@ def stage2_summarize_section(section: _Section, section_text: str,
         "「〜する」「〜している」「〜なる」「〜だ」など、自然な常体の語尾を使い分けてください。"
     )
 
+    desc_block = (
+        f"\n【動画のDescription（参考情報）】\n{description}\n"
+        if description else ""
+    )
     user_prompt = (
         f"動画「{title}」の要約を作成しています。\n"
         f"以下は動画全体のアウトライン（全{n}セクション）です：\n\n"
-        f"{outline_list}\n\n"
+        f"{outline_list}\n"
+        f"{desc_block}\n"
         f"今回はセクション{idx+1}「{section.heading}」（{start_label}〜{end_label}）を要約してください。\n\n"
         f"【headingのルール】\n"
         f"- 「何についての話か」＋「その結論・評価」を20〜40字の一文で表してください。\n"
@@ -388,7 +398,7 @@ def stage2_summarize_section(section: _Section, section_text: str,
     return response.choices[0].message.parsed
 
 
-def stage2_summarize_all_parallel(vtt_entries, outline: _OutlineResult, title: str) -> list:
+def stage2_summarize_all_parallel(vtt_entries, outline: _OutlineResult, title: str, description: str = None) -> list:
     """Stage 2: 全セクションを ThreadPoolExecutor で並列要約する。
 
     戻り値: セクション順に並んだ要約文字列のリスト
@@ -401,7 +411,7 @@ def stage2_summarize_all_parallel(vtt_entries, outline: _OutlineResult, title: s
         sec = sections[idx]
         end_sec = sections[idx + 1].start_seconds if idx + 1 < n else float('inf')
         section_text = build_section_text(vtt_entries, sec.start_seconds, end_sec, timestamps=False)
-        summary = stage2_summarize_section(sec, section_text, outline, title, idx)
+        summary = stage2_summarize_section(sec, section_text, outline, title, idx, description=description)
         return idx, summary
 
     with ThreadPoolExecutor(max_workers=5) as executor:
@@ -449,7 +459,7 @@ def assemble_markdown(outline: _OutlineResult, summaries: list, title: str) -> s
     return "\n".join(lines)
 
 
-def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, thumbnail_path=None, images_future=None):
+def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, thumbnail_path=None, images_future=None, description=None):
     """字幕ファイルを要約してHTMLを生成する（2段階方式）
 
     images_future: concurrent.futures.Future を渡すと、HTML生成直前に
@@ -462,16 +472,22 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, t
 
     print(f'要約中（Stage1: {MODEL_STAGE1} / Stage2: {MODEL_STAGE2}）')
 
-    # ── Stage 1: アウトライン取得 ──────────────────────────────────────────
+    # ── タイトル和訳（英語タイトルに日本語訳を付加）────────────────────────
+    print('  [Title] 和訳確認中...')
+    display_title = make_display_title(title)
+    if display_title != title:
+        print(f'  [Title] {display_title}')
+
+    # ── Stage 1: アウトライン取得（AIプロンプトには原題を使用）────────────
     print('  [Stage 1] アウトライン生成中...')
-    outline = stage1_get_outline(vtt_entries, title, video_duration_sec)
+    outline = stage1_get_outline(vtt_entries, title, video_duration_sec, description=description)
 
     # ── Stage 2: セクション並列要約 ────────────────────────────────────────
     print(f'  [Stage 2] {len(outline.sections)}セクションを並列要約中...')
-    summaries = stage2_summarize_all_parallel(vtt_entries, outline, title)
+    summaries = stage2_summarize_all_parallel(vtt_entries, outline, title, description=description)
 
-    # ── Markdown 組み立て ──────────────────────────────────────────────────
-    responseA_text = assemble_markdown(outline, summaries, title)
+    # ── Markdown 組み立て（表示用タイトルを使用）──────────────────────────
+    responseA_text = assemble_markdown(outline, summaries, display_title)
 
     # ── ハイライト生成 ─────────────────────────────────────────────────────
     print('  [Highlights] ポイント生成中...')
@@ -502,7 +518,7 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, t
         images, thumbnail_path = images_future.result()
 
     # HTMLファイルを生成
-    txt_to_html(result, output_html_path, url_base, images, detail_text, thumbnail_path, vtt_entries, title)
+    txt_to_html(result, output_html_path, url_base, images, detail_text, thumbnail_path, vtt_entries, display_title, description=description)
 
 def extract_timestamp(line):
     """行から時間情報を抽出する"""
@@ -636,7 +652,7 @@ def markdown_to_html(text):
     
     return '\n'.join(html_lines)
 
-def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_text=None, thumbnail_path=None, vtt_entries=None, title: str = ""):
+def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_text=None, thumbnail_path=None, vtt_entries=None, title: str = "", description: str = None):
     """Markdown ライクなテキストを data.js + index.html に変換
 
     従来のモノリシックHTML生成の代わりに:
@@ -802,6 +818,7 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
         "thumbnail": thumbnail_rel,
         "sections": sections,
         "detail": markdown_to_html(detail_text) if detail_text else None,
+        "description": description or None,
     }
 
     # ---------------------- data.js を書き出し ---------------------- #
@@ -996,7 +1013,69 @@ def generate_detail_text(vtt_content, title):
         print(f"詳細テキスト生成でエラーが発生しました: {str(e)}")
         return None
 
-def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=False, thumbnail_path=None, images_future=None):
+def make_display_title(title: str) -> str:
+    """タイトルが日本語以外の場合、原題の後ろに和訳を付けて返す。
+    日本語が主体の場合はそのまま返す。"""
+    if not title:
+        return title
+    prompt = (
+        f"以下の動画タイトルを確認してください。\n"
+        f"日本語以外（英語など）で書かれている場合は、自然な日本語訳だけを出力してください。\n"
+        f"日本語が主体の場合は何も出力しないでください（空文字）。\n"
+        f"タイトルの訳のみを出力し、説明・記号・引用符は不要です。\n\n"
+        f"{title}"
+    )
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        count_tokens(response)
+        ja = response.choices[0].message.content.strip()
+        if ja:
+            return f"{title}　{ja}"
+    except Exception as e:
+        print(f"⚠️ タイトル和訳エラー: {str(e)}")
+    return title
+
+def filter_description(description: str, title: str) -> str:
+    """descriptionから要約補足に使えそうな部分を抜粋して返す。日本語以外は和訳。失敗時はNone。"""
+    if not description:
+        return None
+    prompt = (
+        f"以下のdescriptionから、動画字幕の要約に補足として使えそうな箇所だけを抜粋してください。\n\n"
+        f"【言語について】\n"
+        f"- descriptionが日本語で書かれている場合は、原文のまま一字一句変えずに抜粋してください。\n"
+        f"- 日本語以外の言語で書かれている場合は、抜粋する箇所を日本語に訳して出力してください。\n"
+        f"  訳す際も要約・言い換えはせず、原文の意味を忠実に日本語にしてください。\n\n"
+        f"【共通条件】\n"
+        f"- 要約しない\n"
+        f"- 言い換えしない\n"
+        f"- 箇条書きに再構成しない\n"
+        f"- 情報を分類しない\n"
+        f"- 原文にない見出しを足さない\n"
+        f"- 順番は原文どおり\n"
+        f"- 不要な箇所は省略してよい\n"
+        f"- 広告、関連動画、チャンネル登録、共有、視聴回数、ハッシュタグ、画像出典、URLは除外\n"
+        f"- 時間を含む見出し（例：00:23 【兵士】甘煮）は重要なので残す\n"
+        f"- 動画のなかで紹介してるものの情報やURLも残す\n"
+        f"- 出力は抜粋・訳出した内容だけにする\n\n"
+        f"動画タイトル：{title}\n\n"
+        f"Description:\n{description}"
+    )
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        count_tokens(response)
+        result = response.choices[0].message.content.strip()
+        return result or None
+    except Exception as e:
+        print(f"⚠️ description フィルタエラー: {str(e)}")
+        return None
+
+def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=False, thumbnail_path=None, images_future=None, description=None):
     """
     VTTファイルを要約してHTMLを生成する
 
@@ -1032,7 +1111,7 @@ def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=Fal
         vtt_content = read_vtt(vtt)
         detail_text = generate_detail_text(vtt_content, title)
     
-    yoyaku_gemini(vtt, title, html_path, images, detail_text, thumbnail_path, images_future=images_future)
+    yoyaku_gemini(vtt, title, html_path, images, detail_text, thumbnail_path, images_future=images_future, description=description)
 
     # トークン使用量サマリーを表示
     print_token_summary()

@@ -6,7 +6,7 @@ import requests
 from concurrent.futures import ThreadPoolExecutor
 #import subprocess
 from youtube_transcript_api import YouTubeTranscriptApi
-from ret_youyaku_html import do as create_summary
+from ret_youyaku_html import do as create_summary, filter_description
 
 import yt_dlp
 from PIL import Image
@@ -308,6 +308,16 @@ def get_video_id(url):
     match = re.search(pattern, url)
     return match.group(1) if match else None
 '''
+def fetch_video_description(url):
+    """動画のdescriptionをyt-dlpで取得して返す（失敗時はNone）"""
+    try:
+        with yt_dlp.YoutubeDL({'skip_download': True, 'quiet': True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+            return info.get('description', '') or None
+    except Exception as e:
+        print(f"⚠️ description取得エラー: {str(e)}")
+        return None
+
 def get_youtube_title(video_id):
     """YouTubeの動画タイトルをWebページから取得"""
     try:
@@ -523,11 +533,34 @@ def process_video(url):
             if detail_mode:
                 print("詳細モードで実行中...")
 
+            # description を並列処理の前に取得
+            print("\n動画のdescriptionを取得中...")
+            description = fetch_video_description(url)
+            if description:
+                print(f"\n{'='*50}")
+                print("[Description 原文]")
+                print(description)
+                print('='*50)
+
+                print("\n[Description フィルタ済み] AIで整理中...")
+                description_filtered = filter_description(description, video_title)
+                if description_filtered:
+                    print(f"\n{'='*50}")
+                    print("[Description フィルタ済み]")
+                    print(description_filtered)
+                    print('='*50)
+                else:
+                    print("⚠️ descriptionフィルタ結果が空でした（原文をそのまま使用）")
+                    description_filtered = description
+            else:
+                print("⚠️ descriptionを取得できませんでした")
+                description_filtered = None
+
             # ストーリーボードを裏で並列ダウンロードしながら要約を実行
             print("\nストーリーボード画像とサムネイルのダウンロードを開始（要約と並列実行）...")
             with ThreadPoolExecutor(max_workers=1) as executor:
                 images_future = executor.submit(dl_images, url, images_dir, output_dir)
-                html_path = create_summary(result, video_title, output_dir, video_url, images_future=images_future, detail_mode=detail_mode)
+                html_path = create_summary(result, video_title, output_dir, video_url, images_future=images_future, detail_mode=detail_mode, description=description_filtered)
             print(f"要約HTMLが作成されました: {html_path}")
             
             # VTTファイルを削除

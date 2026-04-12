@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="template-version" content="8">
+<meta name="template-version" content="9">
 <style>
 body{font-family:sans-serif;line-height:1.7em;padding:1em;background:#121212;color:#fff}
 h1,h2,h3{color:#ff9800;border-bottom:1px solid #333;padding-bottom:.3em;margin-top:1.5em}
@@ -27,6 +27,17 @@ details.subtitle-toggle[open] summary{border-bottom:1px solid #333}
 .subtitle-content{padding:12px 16px;color:#ccc;font-size:0.9em;line-height:1.8em;white-space:pre-wrap;max-height:400px;overflow-y:auto}
 .ai-summary-link{margin-left:1em;color:#4fc3f7;font-size:0.85em;padding:2px 8px;background:#2a2a2a;border-radius:4px}
 .ai-summary-link:hover{background:#3a3a3a;color:#fff}
+.description-block{background:#1a1a1a;border:1px solid #333;border-radius:6px;padding:12px 16px;margin:1em 0;font-size:0.88em;color:#bbb;line-height:1.7em}
+.description-block a{color:#4fc3f7}
+.desc-visible{white-space:pre-wrap}
+.desc-details{margin-top:6px}
+.desc-details summary{cursor:pointer;color:#777;font-size:0.9em;user-select:none;list-style:none;padding:2px 0}
+.desc-details summary::before{content:'▶ '}
+.desc-details[open] summary::before{content:'▼ '}
+.desc-details summary:hover{color:#ccc}
+.desc-more{white-space:pre-wrap}
+.desc-close-btn{display:block;margin:10px auto 2px;background:none;border:1px solid #555;color:#888;cursor:pointer;font-size:0.85em;padding:3px 16px;border-radius:4px}
+.desc-close-btn:hover{color:#ccc;border-color:#aaa}
 </style>
 <script src="data.js"></script>
 <script>if(typeof PAGE_DATA!=='undefined'&&PAGE_DATA.title)document.title=PAGE_DATA.title;</script>
@@ -119,6 +130,62 @@ details.subtitle-toggle[open] summary{border-bottom:1px solid #333}
     thumb.onerror = function() { this.style.display = 'none'; };
     document.body.appendChild(thumb);
   }
+
+  // --- Description 構築関数（h1 直後に挿入するため関数化）---
+  function makeDescLine(line) {
+    var urlRe = /https?:\/\/[^\s)]+/g;
+    if (!urlRe.test(line)) { return document.createTextNode(line + '\n'); }
+    urlRe.lastIndex = 0;
+    var frag = document.createDocumentFragment();
+    var lastIdx = 0, m;
+    while ((m = urlRe.exec(line)) !== null) {
+      if (m.index > lastIdx) frag.appendChild(document.createTextNode(line.slice(lastIdx, m.index)));
+      var a = document.createElement('a');
+      a.href = m[0]; a.target = '_blank'; a.rel = 'noopener'; a.textContent = m[0];
+      frag.appendChild(a);
+      lastIdx = m.index + m[0].length;
+    }
+    if (lastIdx < line.length) frag.appendChild(document.createTextNode(line.slice(lastIdx)));
+    frag.appendChild(document.createTextNode('\n'));
+    return frag;
+  }
+
+  function buildDescriptionBlock() {
+    if (!data.description) return null;
+    var descDiv = document.createElement('div');
+    descDiv.className = 'description-block';
+    var descLines = data.description.split('\n');
+    var VISIBLE_LINES = 5;
+    var visibleDiv = document.createElement('div');
+    visibleDiv.className = 'desc-visible';
+    for (var di = 0; di < Math.min(VISIBLE_LINES, descLines.length); di++) {
+      visibleDiv.appendChild(makeDescLine(descLines[di]));
+    }
+    descDiv.appendChild(visibleDiv);
+    if (descLines.length > VISIBLE_LINES) {
+      var descDetails = document.createElement('details');
+      descDetails.className = 'desc-details';
+      var descSummary = document.createElement('summary');
+      descSummary.textContent = '続きを表示';
+      descDetails.appendChild(descSummary);
+      var moreDiv = document.createElement('div');
+      moreDiv.className = 'desc-more';
+      for (var di2 = VISIBLE_LINES; di2 < descLines.length; di2++) {
+        moreDiv.appendChild(makeDescLine(descLines[di2]));
+      }
+      var closeBtn = document.createElement('button');
+      closeBtn.className = 'desc-close-btn';
+      closeBtn.textContent = '▲ 閉じる';
+      (function(det) {
+        closeBtn.addEventListener('click', function() { det.open = false; });
+      })(descDetails);
+      moreDiv.appendChild(closeBtn);
+      descDetails.appendChild(moreDiv);
+      descDiv.appendChild(descDetails);
+    }
+    return descDiv;
+  }
+  var descInserted = false;
 
   // --- 詳細へのジャンプリンク ---
   if (data.detail) {
@@ -241,6 +308,13 @@ details.subtitle-toggle[open] summary{border-bottom:1px solid #333}
     }
 
     document.body.appendChild(sectionDiv);
+
+    // タイトルセクションの直後に description を挿入
+    if (!descInserted && data.title && sec.heading === data.title) {
+      descInserted = true;
+      var db = buildDescriptionBlock();
+      if (db) document.body.appendChild(db);
+    }
   }
 
   // --- 詳細セクション ---
