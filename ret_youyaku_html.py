@@ -374,6 +374,7 @@ def stage2_summarize_section(section: _Section, section_text: str,
         f"  「本セクションでは〜が説明された」のようなメタ記述は避け、内容を直接書いてください。\n"
         f"- 話題ごとに段落を分け、必要に応じて各段落の冒頭に短い小見出しを付けてください。\n"
         f"  小見出しは `####` 形式で書いてください（例：`#### 音楽の評価`）。\n"
+        f"  小見出しを閉じるための単独の `####` 行は出力しないでください。\n"
         f"  小見出しは分類名ではなく、その段落の要点が分かる表現にしてください。\n"
         f"  小見出しだけ追っても、大まかな流れが分かるようにしてください。\n"
         f"- 原則として本文は自然な文章で整えてください。\n"
@@ -683,6 +684,24 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
             result.append({"src": rel, "start": img_start, "end": img_end})
         return result
 
+    def parse_markdown_heading(line: str):
+        """Markdown の ATX 見出しを解析する。
+
+        AI が `#### 見出し ####` や区切りだけの `####` を返すことがあるため、
+        見出し本文とマーカーだけの行を明確に分けて扱う。
+        """
+        m = re.match(r'^\s*(#{1,6})(.*)$', line)
+        if not m:
+            return None
+        level = min(len(m.group(1)), 4)
+        heading_text = m.group(2).strip()
+        heading_text = re.sub(r'\s+#{1,6}\s*$', '', heading_text).strip()
+        return level, heading_text
+
+    def inline_markdown_to_html(text: str):
+        replaced = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
+        return re.sub(r"\*\*", "", replaced)
+
     # ---------------------- urlbase から video_id を抽出 ---------------------- #
     video_id_match = re.search(r'[?&]v=([a-zA-Z0-9_-]+)', urlbase)
     video_id = video_id_match.group(1) if video_id_match else ''
@@ -735,17 +754,24 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
             continue
 
         # ----- 見出し ----- #
-        m_h = re.match(r'^(#{1,4})\s*(.+)$', line)
-        if m_h:
+        heading = parse_markdown_heading(line)
+        if heading:
             if in_list:
                 current["body"].append("</ul>")
                 in_list = False
+
+            level, heading_text = heading
+            if not heading_text:
+                continue
+
+            ts_sec = parse_timestamp(heading_text)
+            if level >= 4 and ts_sec is None:
+                current["body"].append(f"<h{level}>{inline_markdown_to_html(heading_text)}</h{level}>")
+                continue
+
             flush()
-            level = min(len(m_h.group(1)), 4)
-            heading_text = m_h.group(2).strip()
             current["heading_text"] = heading_text
             current["level"] = level
-            ts_sec = parse_timestamp(heading_text)
             if ts_sec is not None:
                 add_timestamp_data(ts_sec, idx)
             continue
@@ -778,9 +804,7 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
                 add_timestamp_data(ts_sec, idx)
 
             if body_text:
-                body_html = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", body_text)
-                body_html = re.sub(r"\*\*", "", body_html)
-                current["body"].append(f"<p>{body_html}</p>")
+                current["body"].append(f"<p>{inline_markdown_to_html(body_text)}</p>")
             continue
 
         # ----- 本文 / リスト ----- #
@@ -791,9 +815,7 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
             item_raw = line.lstrip("* ")
             if re.fullmatch(r"\*\*\s*\*\*", item_raw.strip()):
                 continue
-            item_html = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", item_raw)
-            item_html = re.sub(r"\*\*", "", item_html)
-            current["body"].append(f"<li>{item_html}</li>")
+            current["body"].append(f"<li>{inline_markdown_to_html(item_raw)}</li>")
         else:
             if in_list:
                 current["body"].append("</ul>")
@@ -801,9 +823,7 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
             if line.startswith("http://") or line.startswith("https://"):
                 current["body"].append(f'<p><a href="{line}" target="_blank">{line}</a></p>')
             else:
-                replaced = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", line)
-                replaced = re.sub(r"\*\*", "", replaced)
-                current["body"].append(f"<p>{replaced}</p>")
+                current["body"].append(f"<p>{inline_markdown_to_html(line)}</p>")
 
     if in_list:
         current["body"].append("</ul>")
