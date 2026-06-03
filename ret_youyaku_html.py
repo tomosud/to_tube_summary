@@ -579,7 +579,8 @@ def get_html_header():
         "<head><meta charset='utf-8'>",
         "<style>",
         "body{font-family:sans-serif;line-height:1.7em;padding:1em;background:#121212;color:#fff}",
-        "h1,h2,h3,h4{color:#ff9800;border-bottom:1px solid #333;padding-bottom:.3em;margin-top:1.5em}",
+        "h1,h2{color:#ff9800;border-bottom:1px solid #333;padding-bottom:.3em;margin-top:1.5em}",
+        "h3,h4{color:#ffb74d;font-size:0.95em;margin-top:1.2em;margin-bottom:0.2em}",
         "ul{margin-left:1.5em}",
         "li{margin-bottom:.3em}",
         "p{margin-top:.8em}",
@@ -611,6 +612,8 @@ def get_html_header():
 
 def markdown_to_html(text):
     """MarkdownテキストをHTMLに変換する"""
+    text = text.replace('\\r\\n', '\n').replace('\\n', '\n')
+    text = re.sub(r'(?<!^)(?<!\n)(#{1,6}\s+\S)', r'\n\1', text)
     lines = text.split('\n')
     html_lines = []
     in_list = False
@@ -663,6 +666,22 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
     """
 
     output_dir = os.path.dirname(output_html_path)
+
+    def normalize_markdown_lines(source):
+        if isinstance(source, str):
+            source = source.splitlines()
+
+        normalized = []
+        for raw in source:
+            text = str(raw).replace('\r\n', '\n').replace('\r', '\n')
+            # Structured model output sometimes contains literal "\n#### ..."
+            # inside a paragraph. Split it before heading detection.
+            text = text.replace('\\r\\n', '\n').replace('\\n', '\n')
+            text = re.sub(r'(?<!^)(?<!\n)(#{1,6}\s+\S)', r'\n\1', text)
+            normalized.extend(text.split('\n'))
+        return normalized
+
+    lines = normalize_markdown_lines(lines)
 
     # ---------------------- 正規表現 ---------------------- #
     ts_pattern = re.compile(r"(?:([0-9]+)時間)?(?:([0-9]+)分)?([0-9]+)秒頃")
