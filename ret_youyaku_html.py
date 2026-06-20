@@ -746,47 +746,50 @@ def extract_timestamp(line):
         return minutes * 60 + seconds
     return None
 
-def find_matching_images(current_time, next_time, images):
-    """指定した時間範囲内の画像を取得する"""
-    if not images:
+def find_matching_images(current_time, next_time, images, limit=6):
+    """見出し区間を等分し、各区画を代表する画像を最大 ``limit`` 枚返す。
+
+    最終見出しではストーリーボードの終端を区間末尾にする。区間内の候補が
+    ``limit`` 枚未満なら、隣接セクションの画像で水増しせず候補をすべて返す。
+    """
+    if not images or limit <= 0:
         return []
-    
-    # 次の見出しの時間が指定されていない場合は、現在時刻から5分後までを範囲とする
-    end_time = next_time if next_time is not None else current_time + 300
-    
-    # 現在の見出しから次の見出しまでの時間範囲内の画像を探す
-    matching_images = []
-    for image in images:
-        filepath, img_start_time, img_end_time = image
-        # 画像の時間範囲が見出しの時間範囲と重なっているかチェック
-        if (img_start_time <= end_time and img_end_time >= current_time):
-            matching_images.append((filepath, img_start_time, img_end_time))
-    
-    # 時間でソート
-    matching_images.sort(key=lambda x: x[1])
-    
-    # 画像が6枚未満の場合、前後の時間帯も含めて探す
-    if len(matching_images) < 6:
-        window_seconds = 60  # 1分
-        extended_matches = []
-        for image in images:
-            filepath, img_start_time, img_end_time = image
-            if (img_start_time <= current_time + window_seconds and 
-                img_end_time >= current_time - window_seconds and
-                (filepath, img_start_time, img_end_time) not in matching_images):
-                extended_matches.append((filepath, img_start_time, img_end_time))
-        
-        # 追加の画像も時間でソート（現在時刻からの距離で）
-        extended_matches.sort(key=lambda x: abs(x[1] - current_time))
-        
-        # 必要な数だけ追加
-        remaining_slots = 6 - len(matching_images)
-        matching_images.extend(extended_matches[:remaining_slots])
-        
-        # 最終的な時間順でソート
-        matching_images.sort(key=lambda x: x[1])
-    
-    return matching_images[:6]  # 最大6枚まで表示
+
+    ordered_images = sorted(images, key=lambda x: (x[1], x[2], x[0]))
+    storyboard_end = max(image[2] for image in ordered_images)
+    end_time = next_time
+    if end_time is None or end_time <= current_time:
+        end_time = storyboard_end
+    if end_time <= current_time:
+        return []
+
+    # 境界をまたぐストーリーボードセルも候補に含める。ただし、次の区間から
+    # 始まるセルは含めないよう半開区間 [current_time, end_time) として扱う。
+    candidates = [
+        image for image in ordered_images
+        if image[1] < end_time and image[2] > current_time
+    ]
+    if len(candidates) <= limit:
+        return candidates
+
+    # 区間を limit 個のビンに分け、それぞれの中央時刻に最も近い未選択画像を
+    # 1枚ずつ選ぶ。画像の中央時刻を比較することでセル幅の差にも対応する。
+    interval = end_time - current_time
+    remaining = list(candidates)
+    selected = []
+    for index in range(limit):
+        target = current_time + (index + 0.5) * interval / limit
+        best = min(
+            remaining,
+            key=lambda image: (
+                abs(((image[1] + image[2]) / 2) - target),
+                image[1],
+            ),
+        )
+        selected.append(best)
+        remaining.remove(best)
+
+    return sorted(selected, key=lambda x: (x[1], x[2], x[0]))
 
 def get_html_header():
     """HTMLヘッダーを生成する"""
@@ -970,12 +973,8 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
     in_list = False
 
     def add_timestamp_data(ts_sec, idx):
-        """タイムスタンプに関連する画像と字幕をcurrentに設定"""
+        """タイムスタンプと関連字幕をcurrentに設定"""
         next_sec = next((sec for i2, sec in timestamps if i2 > idx), None)
-        if images:
-            imgs = find_matching_images(ts_sec, next_sec, images)
-            if imgs:
-                current["images"] = build_image_data(imgs)
         current["timestamp"] = ts_sec
         if vtt_entries:
             subtitle_text = get_subtitle_for_range(vtt_entries, ts_sec, next_sec)
@@ -1063,6 +1062,27 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
     if in_list:
         current["body"].append("</ul>")
     flush()
+
+    # 全セクションの見出し時刻が確定してから画像を配分する。元テキスト中の
+    # 任意のタイムスタンプではなく、次の「時刻付き見出し」を区間末尾にする。
+    timestamped_indices = [
+        index for index, section in enumerate(sections)
+        if section["timestamp"] is not None
+    ]
+    for position, section_index in enumerate(timestamped_indices):
+        start_time = sections[section_index]["timestamp"]
+        # 重複時刻やモデル出力の時刻逆行があっても空区間にしないよう、後続の
+        # 見出しから現在時刻より後にある最初の時刻を採用する。
+        next_time = next(
+            (
+                sections[next_index]["timestamp"]
+                for next_index in timestamped_indices[position + 1:]
+                if sections[next_index]["timestamp"] > start_time
+            ),
+            None,
+        )
+        matched = find_matching_images(start_time, next_time, images or [])
+        sections[section_index]["images"] = build_image_data(matched)
 
     # ---------------------- PAGE_DATA を構築 ---------------------- #
     # 全ストーリーボードを時刻順に並べたフィルムストリップ（左レール用）
