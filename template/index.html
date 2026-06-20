@@ -4,21 +4,22 @@
 <meta charset="utf-8">
 <meta name="template-version" content="11">
 <style>
-body{font-family:sans-serif;line-height:1.7em;padding:1em;background:#121212;color:#fff}
-h1,h2{color:#ff9800;border-bottom:1px solid #333;padding-bottom:.3em;margin-top:1.5em}
-h3,h4{color:#ffb74d;font-size:0.95em;margin-top:1.2em;margin-bottom:0.2em}
+body{font-family:system-ui,"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;line-height:1.85;padding:1.2em;background:#121212;color:#e8e8e8;max-width:840px;margin:0 auto;box-sizing:border-box;font-size:17px}
+h1{color:#ff9800;font-size:1.7em;border-bottom:1px solid #333;padding-bottom:.3em;margin-top:1.2em}
+h2{color:#ff9800;font-size:1.32em;border-bottom:1px solid #333;padding-bottom:.3em;margin-top:.3em;margin-bottom:.2em}
+h3,h4{color:#ffb74d;font-size:1em;font-weight:700;margin-top:1.5em;margin-bottom:0.3em}
 ul{margin-left:1.5em}
 li{margin-bottom:.3em}
-p{margin-top:.8em}
+p{margin:.9em 0}
 a{color:#4fc3f7;text-decoration:none}
-.timestamp-section{margin:1.5em 0}
-.timestamp-images{display:grid;grid-template-columns:repeat(6,1fr);gap:16px;margin-top:.8em}
+.timestamp-section{margin:1.2em 0 0;padding-top:1em;border-top:1px solid #2a2a2a}
+.timestamp-section:first-of-type{border-top:none;padding-top:.4em}
+.timestamp-images{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:.8em}
 .thumb-container{position:relative;width:100%;aspect-ratio:16/9;transition:transform 0.2s;display:block;overflow:hidden}
 .thumb-container:hover{transform:scale(1.8);z-index:100}
-.timestamp-images .thumb-container:nth-child(6n+1){transform-origin:left center}
-.timestamp-images .thumb-container:nth-child(6n+2){transform-origin:left center}
-.timestamp-images .thumb-container:nth-child(6n+5){transform-origin:right center}
-.timestamp-images .thumb-container:nth-child(6n){transform-origin:right center}
+.timestamp-images .thumb-container:nth-child(3n+1){transform-origin:left center}
+.timestamp-images .thumb-container:nth-child(3n+2){transform-origin:center center}
+.timestamp-images .thumb-container:nth-child(3n){transform-origin:right center}
 .thumb-img{width:100%;height:100%;object-fit:cover;border-radius:4px;cursor:pointer}
 .thumb-container::after{content:'▶';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,255,255,0.4);font-size:24px;background:rgba(0,0,0,0.4);padding:6px 14px;border-radius:50%;pointer-events:none;z-index:3}
 .jump-link{background:#333;padding:10px;margin:10px 0;border-radius:5px;text-align:center}
