@@ -330,6 +330,8 @@ def get_youtube_title(video_id):
                 title = title_match.group(1)
                 # YouTubeのタイトルには " - YouTube" が付くので削除
                 title = title.replace(" - YouTube", "")
+                # HTMLエンティティ（&#39; → ' など）をデコード
+                title = html.unescape(title).strip()
                 return title
     except Exception as e:
         print(f"タイトル取得エラー: {str(e)}")
