@@ -1065,6 +1065,15 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
     flush()
 
     # ---------------------- PAGE_DATA を構築 ---------------------- #
+    # 全ストーリーボードを時刻順に並べたフィルムストリップ（左レール用）
+    filmstrip = build_image_data(sorted(images, key=lambda x: x[1])) if images else []
+    duration_sec = 0
+    if vtt_entries:
+        try:
+            duration_sec = int(max(e[1] for e in vtt_entries))
+        except (ValueError, IndexError):
+            duration_sec = 0
+
     page_data = {
         "schema_version": 1,
         "title": title,
@@ -1074,6 +1083,8 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
         "sections": sections,
         "detail": markdown_to_html(detail_text) if detail_text else None,
         "description": description or None,
+        "filmstrip": filmstrip,
+        "duration": duration_sec,
     }
 
     # ---------------------- data.js を書き出し ---------------------- #

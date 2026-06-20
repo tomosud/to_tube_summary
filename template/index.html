@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="template-version" content="11">
 <style>
-body{font-family:system-ui,"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;line-height:1.85;padding:1.2em;background:#121212;color:#e8e8e8;max-width:840px;margin:0 auto;box-sizing:border-box;font-size:17px}
+body{font-family:system-ui,"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;line-height:1.85;padding:1.2em;background:#121212;color:#e8e8e8;max-width:840px;margin:0 auto;box-sizing:border-box;font-size:17px;position:relative}
 h1{color:#ff9800;font-size:1.7em;border-bottom:1px solid #333;padding-bottom:.3em;margin-top:1.2em}
 h2{color:#ff9800;font-size:1.32em;border-bottom:1px solid #333;padding-bottom:.3em;margin-top:.3em;margin-bottom:.2em}
 h3,h4{color:#ffb74d;font-size:1em;font-weight:700;margin-top:1.5em;margin-bottom:0.3em}
@@ -43,6 +43,13 @@ details.subtitle-toggle[open] summary{border-bottom:1px solid #333}
 .desc-more{white-space:pre-wrap}
 .desc-close-btn{display:block;margin:10px auto 2px;background:none;border:1px solid #555;color:#888;cursor:pointer;font-size:0.85em;padding:3px 16px;border-radius:4px}
 .desc-close-btn:hover{color:#ccc;border-color:#aaa}
+html{overflow-x:hidden}
+.filmstrip-rail{position:absolute;top:0;left:-172px;width:148px;z-index:5}
+.filmstrip-frame{position:absolute;left:0;width:148px;height:83px;overflow:hidden;border-radius:4px;cursor:pointer;background:#000;box-shadow:0 1px 4px rgba(0,0,0,.5);transition:transform .15s;transform-origin:right center}
+.filmstrip-frame:hover{transform:scale(1.6);z-index:30}
+.filmstrip-frame img{width:100%;height:100%;object-fit:cover;display:block}
+.filmstrip-frame::after{content:'▶';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,255,255,.5);font-size:13px;background:rgba(0,0,0,.4);padding:1px 6px;border-radius:50%;pointer-events:none}
+@media (max-width:1180px){.filmstrip-rail{display:none}}
 </style>
 <script src="data.js"></script>
 <script>if(typeof PAGE_DATA!=='undefined'&&PAGE_DATA.title)document.title=PAGE_DATA.title;</script>
@@ -221,6 +228,7 @@ details.subtitle-toggle[open] summary{border-bottom:1px solid #333}
       if (level > 4) level = 4;
       var h = document.createElement('h' + level);
       h.textContent = sec.heading;
+      if (sec.timestamp != null) h.setAttribute('data-ts', sec.timestamp);
       sectionDiv.appendChild(h);
     }
 
@@ -338,6 +346,105 @@ details.subtitle-toggle[open] summary{border-bottom:1px solid #333}
     detailDiv.innerHTML = '<h2>📄 詳細内容</h2>' + data.detail;
     document.body.appendChild(detailDiv);
   }
+
+  // --- 左レール：全ストーリーボードを時刻で本文に合わせて並べる ---
+  function buildFilmstrip() {
+    var frames = data.filmstrip;
+    var old = document.getElementById('filmstrip-rail');
+    if (old) old.parentNode.removeChild(old);
+    if (!frames || !frames.length || !videoId) return;
+    // 狭い画面（左マージンが取れない）では作らない
+    if (window.innerWidth < 1180) return;
+
+    // 見出しを「時刻↔Y座標」のアンカーにする
+    var anchors = [];
+    var hs = document.querySelectorAll('[data-ts]');
+    for (var i = 0; i < hs.length; i++) {
+      var t = parseFloat(hs[i].getAttribute('data-ts'));
+      if (isNaN(t)) continue;
+      anchors.push({ t: t, y: hs[i].getBoundingClientRect().top + window.pageYOffset });
+    }
+    if (!anchors.length) return;
+    anchors.sort(function(a, b) { return a.t - b.t; });
+    // 先頭(0,0)と末尾(動画終端, ページ下端)を補う
+    if (anchors[0].t > 0) anchors.unshift({ t: 0, y: 0 });
+    var last = frames[frames.length - 1];
+    var endT = Math.max(data.duration || 0, last.end || last.start || 0, anchors[anchors.length - 1].t + 1);
+    anchors.push({ t: endT, y: document.documentElement.scrollHeight });
+
+    function timeToY(t) {
+      if (t <= anchors[0].t) return anchors[0].y;
+      for (var k = 0; k < anchors.length - 1; k++) {
+        var a = anchors[k], b = anchors[k + 1];
+        if (t >= a.t && t <= b.t) {
+          return b.t === a.t ? a.y : a.y + (t - a.t) / (b.t - a.t) * (b.y - a.y);
+        }
+      }
+      return anchors[anchors.length - 1].y;
+    }
+
+    var rail = document.createElement('div');
+    rail.id = 'filmstrip-rail';
+    rail.className = 'filmstrip-rail';
+    document.body.appendChild(rail);
+    var railTop = rail.getBoundingClientRect().top + window.pageYOffset;
+
+    var MIN_GAP = 90; // フレーム高さ(83)＋余白。これより詰まる分は間引く
+    var lastY = -Infinity;
+    for (var j = 0; j < frames.length; j++) {
+      var f = frames[j];
+      var y = timeToY(f.start);
+      if (y - lastY < MIN_GAP) continue; // 重なる分は自動間引き
+      lastY = y;
+
+      var frame = document.createElement('div');
+      frame.className = 'filmstrip-frame';
+      frame.style.top = (y - railTop) + 'px';
+      var im = document.createElement('img');
+      im.src = f.src;
+      im.loading = 'lazy';
+      im.alt = '';
+      im.onerror = function() { this.style.display = 'none'; };
+      frame.appendChild(im);
+
+      (function(el, startSec) {
+        var iframe = null;
+        el.addEventListener('click', function() {
+          if (iframe) return;
+          iframe = document.createElement('iframe');
+          iframe.src = makeVideoLink(baseUrl, Math.floor(startSec));
+          iframe.style.position = 'absolute';
+          iframe.style.top = '0';
+          iframe.style.left = '0';
+          iframe.style.width = '200%';
+          iframe.style.height = '200%';
+          iframe.style.border = 'none';
+          iframe.style.borderRadius = '4px';
+          iframe.style.transformOrigin = 'top left';
+          iframe.style.transform = 'scale(0.5)';
+          iframe.style.zIndex = '4';
+          iframe.allowFullscreen = true;
+          el.appendChild(iframe);
+        });
+        el.addEventListener('mouseleave', function() {
+          setTimeout(function() {
+            if (!iframe) return;
+            var fullscreenEl = document.fullscreenElement || document.webkitFullscreenElement;
+            if (fullscreenEl === iframe || (fullscreenEl && el.contains(fullscreenEl))) return;
+            iframe.src = '';
+            el.removeChild(iframe);
+            iframe = null;
+          }, 150);
+        });
+      })(frame, f.start);
+
+      rail.appendChild(frame);
+    }
+  }
+
+  buildFilmstrip();
+  // 画像読込でレイアウトが確定した後に再計算（アンカーY座標がずれるため）
+  window.addEventListener('load', buildFilmstrip);
 
   // --- makeEmbedUrl, embedParams は不要になったが互換性のため残す ---
 })();
