@@ -5,6 +5,7 @@ import shutil
 import glob
 import hashlib
 import urllib.parse
+import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
 from pydantic import BaseModel
@@ -25,6 +26,22 @@ class _OutlineResult(BaseModel):
 class _SectionSummary(BaseModel):
     heading: str  # 結論を含む一行要約の見出し（20〜40字）
     summary: str  # Markdown本文（見出し行なし）
+
+# Pass 1（窓ごとの切り分け）の出力。境界は秒数ではなくブロックIDで返させる。
+class _BlockSection(BaseModel):
+    start_block_id: int  # そのセクションが始まる字幕ブロックのID
+    heading: str         # 仮見出し（日本語20字以内）
+
+class _WindowOutline(BaseModel):
+    sections: List[_BlockSection]
+
+# Pass 3（全体整合）の出力。入力セクションと1対1・同順で返させる。
+class _PolishedSection(BaseModel):
+    heading: str               # 全体を俯瞰して整えた見出し（20〜40字）
+    merge_with_previous: bool  # 直前セクションと実質同じ話題なら true（統合）
+
+class _PolishResult(BaseModel):
+    sections: List[_PolishedSection]
 
 # テンプレートファイルのパス
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template')
@@ -199,6 +216,77 @@ def _seconds_to_label(sec: int) -> str:
     return f"{m}分{s}秒"
 
 
+def _dedup_join(texts) -> str:
+    """字幕の連続テキスト断片を、重複・部分重なりを除去して連結する。
+
+    build_section_text のマージロジックと同じ（マーカー処理なし版）。
+    """
+    merged = []
+    for text in texts:
+        if merged and text == merged[-1]:
+            continue
+        if merged:
+            prev = merged[-1]
+            max_overlap = min(len(prev), len(text), 50)
+            overlap_found = False
+            for overlap_len in range(max_overlap, 2, -1):
+                if prev.endswith(text[:overlap_len]):
+                    merged[-1] = prev + text[overlap_len:]
+                    overlap_found = True
+                    break
+            if overlap_found:
+                continue
+        merged.append(text)
+    return ' '.join(merged)
+
+
+def build_blocks(vtt_entries, target_block_sec: float = 10.0):
+    """vtt_entries を ~target_block_sec ごとのブロックに束ねて返す。
+
+    各ブロックは字幕の実タイムスタンプを保持するため、ブロックIDから
+    正確な開始秒を逆引きできる（LLMに秒数を推測させないための土台）。
+
+    Returns:
+        list of tuples: [(block_id, start_seconds, text), ...]
+    """
+    blocks = []
+    cur_start = None
+    cur_texts = []
+
+    def flush():
+        nonlocal cur_start, cur_texts
+        if cur_start is None:
+            return
+        text = _dedup_join(cur_texts)
+        text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text).strip()
+        if text:
+            blocks.append((len(blocks), cur_start, text))
+        cur_start = None
+        cur_texts = []
+
+    for entry_start, _entry_end, text in vtt_entries:
+        if cur_start is not None and entry_start - cur_start >= target_block_sec:
+            flush()
+        if cur_start is None:
+            cur_start = entry_start
+        cur_texts.append(text)
+    flush()
+    return blocks
+
+
+def _render_blocks(blocks, lo: int, hi: int) -> str:
+    """blocks[lo:hi] を「[id] (M:SS) テキスト」形式の文字列にする。
+
+    (M:SS) はモデルが話題の長さ・配分を把握するための参考表示で、
+    境界の確定にはブロックIDのみを使う。
+    """
+    lines = []
+    for bid, start_sec, text in blocks[lo:hi]:
+        m, s = divmod(int(start_sec), 60)
+        lines.append(f"[{bid}] ({m:d}:{s:02d}) {text}")
+    return "\n".join(lines)
+
+
 def build_section_text(vtt_entries, start_sec: int, end_sec: int, timestamps: bool = True) -> str:
     """指定時間範囲の字幕テキストを抽出して返す。
 
@@ -265,66 +353,105 @@ def _validate_outline(outline: _OutlineResult, video_duration_sec: int) -> bool:
 def stage1_get_outline(vtt_entries, title: str, video_duration_sec: int, description: str = None) -> _OutlineResult:
     """Stage 1: VTT全体からセクションのアウトライン（見出し＋開始秒数）を取得する。
 
-    Structured Outputs を使用して _OutlineResult を返す。
-    最大3回リトライし、失敗した場合は ValueError を送出する。
+    LLMの long-context 特性（中盤の注意が薄れ、分割が前半に偏る）を避けるため、
+    字幕を時間でほぼ等分した「窓」に分け、各窓へ時間比例のセクション数ノルマを
+    与えて並列に切り分ける（map方式）。境界は秒数ではなくブロックIDで返させ、
+    ブロックの実タイムスタンプへ逆引きするので、推測による誤差が入らない。
     """
-    # Stage 1 用テキスト: 全体を通して [MM:SS] マーカー付きで抽出
-    full_text = build_section_text(vtt_entries, 0, float('inf'))
+    blocks = build_blocks(vtt_entries)
+    n_blocks = len(blocks)
+    if n_blocks == 0:
+        raise ValueError("Stage 1: 字幕ブロックが空です。")
 
-    duration_min = video_duration_sec // 60
+    block_start = {bid: start_sec for bid, start_sec, _t in blocks}
+
+    duration_min = max(video_duration_sec // 60, 1)
+    # 目標セクション総数（おおむね2分に1個、5〜20の範囲）
+    target_total = min(max(round(duration_min / 2), 5), 20)
+    target_total = min(target_total, n_blocks)
+
+    # 窓数: 1窓あたり約5セクション。窓を小さく保つことで各ブロックが必ず
+    # どこかの窓の「フォーカス内」に入り、中盤の見落とし・前半偏重を防ぐ。
+    n_windows = max(1, math.ceil(target_total / 5))
+    n_windows = min(n_windows, n_blocks)
+
+    # ブロックを n_windows 個の連続レンジへ等分（ブロック数ベース＝ほぼ時間等分）
+    bounds = [round(i * n_blocks / n_windows) for i in range(n_windows + 1)]
 
     system_prompt = (
         "あなたは動画字幕の構造分析スペシャリストです。"
-        "字幕の流れを読み、話題の切れ目を正確に識別します。"
+        "渡された区間だけを読み、話題の切れ目を正確に識別します。"
+    )
+    desc_block = (
+        f"\n【動画のDescription（参考情報）】\n{description}\n"
+        if description else ""
     )
 
-    MAX_RETRIES = 3
-    extra_hint = ""
-    for attempt in range(MAX_RETRIES):
-        desc_block = (
-            f"\n【動画のDescription（参考情報）】\n{description}\n"
-            if description else ""
-        )
+    def segment_window(win_idx):
+        lo, hi = bounds[win_idx], bounds[win_idx + 1]
+        # 窓のノルマ＝総数をブロック数で時間比例配分（最低1）
+        quota = max(1, round(target_total * (hi - lo) / n_blocks))
+        first_id, last_id = blocks[lo][0], blocks[hi - 1][0]
+        block_text = _render_blocks(blocks, lo, hi)
         user_prompt = (
-            f"以下は動画「{title}」の字幕テキストです（[MM:SS]形式の時刻マーカーが約60秒ごとに含まれています）。\n"
-            f"この動画にチャプターを付けるつもりで、話題の切れ目でセクションを区切ってください。\n"
+            f"以下は動画「{title}」字幕の一部（全{n_windows}区間中の第{win_idx+1}区間）です。\n"
+            f"各行は「[ブロックID] (時刻) テキスト」の形式です。\n"
+            f"この区間を話題の切れ目で {quota} 個のセクションに分割してください。\n"
             f"{desc_block}\n"
             f"【ルール】\n"
-            f"- セクション数は動画の長さに応じて5〜20個程度にしてください（動画時間: 約{duration_min}分）。\n"
-            f"- headingは日本語で、その話題を端的に表す20字以内のタイトルにしてください。\n"
-            f"- start_secondsは、そのセクションの話題が始まる秒数を整数で指定してください（[MM:SS]マーカーを参考にしてください）。\n"
-            f"- セクションは必ず時系列順（start_secondsの昇順）に並べてください。\n"
-            f"- チャプターが動画の前半に集中しないようにしてください。動画の前半・中盤・後半にそれぞれチャプターが存在するよう分布させてください。\n"
-            f"  後半に長い話題がある場合も、内容の切れ目があれば適切に分割してください。\n"
-            f"- 同じstart_secondsを複数のセクションに使わないでください。\n"
-            f"{extra_hint}"
-            f"\n字幕テキスト:\n{full_text}"
+            f"- セクションはちょうど {quota} 個にしてください。\n"
+            f"- start_block_id には、その話題が始まる行の【ブロックID】を指定してください"
+            f"（この区間内 {first_id}〜{last_id} のいずれか）。秒数ではなくブロックIDです。\n"
+            f"- 最初のセクションの start_block_id は必ず {first_id} にしてください。\n"
+            f"- start_block_id は昇順で、重複させないでください。\n"
+            f"- heading は日本語で、その話題を端的に表す20字以内にしてください。\n"
+            f"\n字幕（ブロックID付き）:\n{block_text}"
         )
-
         response = client.beta.chat.completions.parse(
             model=MODEL_STAGE1,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            response_format=_OutlineResult,
+            response_format=_WindowOutline,
         )
         count_tokens(response)
+        return win_idx, lo, hi, response.choices[0].message.parsed
 
-        outline = response.choices[0].message.parsed
-        if _validate_outline(outline, video_duration_sec):
-            print(f"  [Stage 1] {len(outline.sections)}セクションを検出")
-            return outline
+    results = [None] * n_windows
+    if n_windows == 1:
+        results[0] = segment_window(0)
+    else:
+        with ThreadPoolExecutor(max_workers=min(5, n_windows)) as executor:
+            futures = {executor.submit(segment_window, i): i for i in range(n_windows)}
+            for future in as_completed(futures):
+                i = futures[future]
+                try:
+                    results[i] = future.result()
+                except Exception as e:
+                    print(f"  [Stage 1] 第{i+1}区間でエラー: {e} → 再試行中...")
+                    results[i] = segment_window(i)
 
-        last_start = outline.sections[-1].start_seconds if outline.sections else 0
-        print(f"  [Stage 1] アウトラインの分散が不均一です（試行{attempt+1}/{MAX_RETRIES}）。"
-              f" 最終セクション={last_start}秒 / 動画={video_duration_sec}秒")
-        extra_hint = (
-            f"【重要】前回の出力では最後のセクションのstart_secondsが{last_start}秒でした。"
-            f"動画長の50%（{video_duration_sec//2}秒）以上にしてください。後半にもセクションを設けてください。\n"
-        )
+    # 窓の結果を時系列に結合（ブロックIDで重複排除し、実秒へ変換）
+    merged = {}  # block_id -> heading（先勝ち）
+    for win_idx, lo, hi, win_outline in sorted(results, key=lambda r: r[0]):
+        lo_id, hi_id = blocks[lo][0], blocks[hi - 1][0]
+        for s in win_outline.sections:
+            bid = max(lo_id, min(hi_id, s.start_block_id))  # 区間内へクランプ
+            merged.setdefault(bid, (s.heading or "").strip() or "（無題）")
 
-    raise ValueError(f"Stage 1: {MAX_RETRIES}回試行してもアウトラインの分散が改善されませんでした。")
+    # 先頭は必ずブロック0始まりにする
+    first_bid = blocks[0][0]
+    if first_bid not in merged:
+        merged[first_bid] = next(iter(merged.values())) if merged else "導入"
+
+    sections = [
+        _Section(heading=merged[bid], start_seconds=int(block_start[bid]))
+        for bid in sorted(merged)
+    ]
+    outline = _OutlineResult(sections=sections)
+    print(f"  [Stage 1] {n_windows}区間から{len(sections)}セクションを検出")
+    return outline
 
 
 def stage2_summarize_section(section: _Section, section_text: str,
@@ -438,6 +565,91 @@ def stage2_summarize_all_parallel(vtt_entries, outline: _OutlineResult, title: s
     return results
 
 
+def stage3_polish(outline: _OutlineResult, summaries: list, title: str):
+    """Pass 3: 全セクションの見出し＋本文を一度に俯瞰し、見出しを横断的に整え、
+    実質同じ話題の隣接セクションを統合する。
+
+    並列のStage 2では原理的に不可能な「全体を見た上での」整合をここで行う。
+    本文は再生成せず（情報欠落・出力コスト増を避ける）、見出しと統合フラグのみを
+    LLMに返させる。失敗・不整合時は入力をそのまま返す（安全側フォールバック）。
+
+    戻り値: (新しい _OutlineResult, 新しい summaries[_SectionSummary])
+    """
+    n = len(outline.sections)
+    if n == 0:
+        return outline, summaries
+
+    def heading_of(sec, res):
+        return res.heading if isinstance(res, _SectionSummary) else sec.heading
+
+    def body_of(res):
+        return res.summary if isinstance(res, _SectionSummary) else (res or "")
+
+    headings = [heading_of(sec, res) for sec, res in zip(outline.sections, summaries)]
+    bodies = [body_of(res) for res in summaries]
+
+    listing = "\n\n".join(
+        f"{i+1}.\n見出し: {headings[i]}\n本文: {bodies[i]}"
+        for i in range(n)
+    )
+    system_prompt = (
+        "あなたは動画要約の編集者です。全セクションを俯瞰し、見出しを統一感のある"
+        "形に整え、実質同じ話題の隣接セクションを統合判断します。"
+    )
+    user_prompt = (
+        f"以下は動画「{title}」の全{n}セクションの見出しと本文です。\n"
+        f"全体を俯瞰して、各セクションの見出しを整えてください。\n\n"
+        f"【目的】\n"
+        f"- 各見出しは「対象＋結論・評価」を含む20〜40字の一文にし、語調と粒度をそろえる。\n"
+        f"- 見出しだけを上から読めば動画全体の流れが分かるようにする。\n"
+        f"- 直前のセクションと実質同じ話題（分割しすぎ）なら merge_with_previous=true にする。\n\n"
+        f"【制約】\n"
+        f"- 入力と同じ数（{n}個）・同じ順番で sections を返してください。"
+        f"統合する場合も枠は残し、merge_with_previous=true で示してください。\n"
+        f"- 先頭セクションの merge_with_previous は必ず false にしてください。\n"
+        f"- 本文は返さなくて構いません（見出しと統合フラグのみ）。\n\n"
+        f"セクション一覧:\n{listing}"
+    )
+    try:
+        response = client.beta.chat.completions.parse(
+            model=MODEL_STAGE1,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format=_PolishResult,
+        )
+        count_tokens(response)
+        polished = response.choices[0].message.parsed.sections
+    except Exception as e:
+        print(f"  [Stage 3] 整合に失敗（元の見出しを使用）: {e}")
+        return outline, summaries
+
+    if len(polished) != n:
+        print(f"  [Stage 3] 返却数が不一致（{len(polished)}≠{n}）→ 元の見出しを使用")
+        return outline, summaries
+
+    new_sections = []
+    new_summaries = []
+    for i in range(n):
+        new_heading = (polished[i].heading or "").strip() or headings[i]
+        merge = polished[i].merge_with_previous and i > 0 and bool(new_summaries)
+        if merge:
+            # 直前セクションへ本文を連結（見出し・開始秒は直前を維持）
+            prev = new_summaries[-1]
+            prev.summary = (prev.summary.rstrip() + "\n\n" + bodies[i]).strip()
+        else:
+            new_sections.append(_Section(
+                heading=new_heading,
+                start_seconds=outline.sections[i].start_seconds,
+            ))
+            new_summaries.append(_SectionSummary(heading=new_heading, summary=bodies[i]))
+
+    merged_count = n - len(new_sections)
+    print(f"  [Stage 3] 見出しを整え、{merged_count}セクションを統合")
+    return _OutlineResult(sections=new_sections), new_summaries
+
+
 def assemble_markdown(outline: _OutlineResult, summaries: list, title: str) -> str:
     """アウトラインとセクション要約から最終 Markdown を組み立てる。
 
@@ -461,7 +673,7 @@ def assemble_markdown(outline: _OutlineResult, summaries: list, title: str) -> s
 
 
 def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, thumbnail_path=None, images_future=None, description=None):
-    """字幕ファイルを要約してHTMLを生成する（2段階方式）
+    """字幕ファイルを要約してHTMLを生成する（3パス方式）
 
     images_future: concurrent.futures.Future を渡すと、HTML生成直前に
                    images_future.result() → (images, thumbnail_path) として解決する。
@@ -486,6 +698,10 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, t
     # ── Stage 2: セクション並列要約 ────────────────────────────────────────
     print(f'  [Stage 2] {len(outline.sections)}セクションを並列要約中...')
     summaries = stage2_summarize_all_parallel(vtt_entries, outline, title, description=description)
+
+    # ── Stage 3: 全体整合（見出しの統一・分割しすぎの統合）──────────────────
+    print('  [Stage 3] 全体整合中...')
+    outline, summaries = stage3_polish(outline, summaries, display_title)
 
     # ── Markdown 組み立て（表示用タイトルを使用）──────────────────────────
     responseA_text = assemble_markdown(outline, summaries, display_title)

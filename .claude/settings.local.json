@@ -8,7 +8,9 @@
       "Read(//c/temp/html/本当に40年前の作品か！？レベルが違う映画魔界転生に海外が大熱狂【海外の反応】/**)",
       "Bash(.venv/Scripts/python -c ':*)",
       "Bash(ls c:/work/script/to_tube_summary/*.py)",
-      "mcp__plugin_claude-mem_mcp-search__smart_outline"
+      "mcp__plugin_claude-mem_mcp-search__smart_outline",
+      "PowerShell(& \"C:\\\\work\\\\script\\\\to_tube_summary\\\\.venv\\\\Scripts\\\\python.exe\" -m py_compile \"C:\\\\work\\\\script\\\\to_tube_summary\\\\ret_youyaku_html.py\")",
+      "PowerShell(if \\($?\\) { \"OK: syntax valid\" })"
     ],
     "deny": [],
     "ask": []
