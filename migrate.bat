@@ -1,17 +1,54 @@
 @echo off
-echo === 既存HTMLデータの移行 ===
-echo.
-echo C:\temp\html 以下の旧フォーマット（モノリシックHTML）を
-echo data.js + index.html 形式に変換します。
-echo.
-echo 旧HTMLは .html.bak にリネームされます（削除はされません）。
-echo.
-pause
+chcp 65001 >nul
+setlocal
 
 cd /d "%~dp0"
-call .venv\Scripts\activate
-python ret_youyaku_html.py --migrate "C:\temp\html"
+
+set "TARGET=C:\temp\html"
+if not "%~1"=="" set "TARGET=%~1"
+
+echo === HTML migration and template update ===
+echo.
+echo Target: %TARGET%
+echo.
+echo Actions:
+echo   1. Convert legacy HTML folders to data.js + index.html.
+echo   2. Update index.html in all migrated folders.
+echo.
+echo Legacy HTML files are preserved as .html.bak files.
+echo.
+
+if exist "%TARGET%\" goto target_ok
+echo [ERROR] Target folder does not exist: %TARGET%
+pause
+exit /b 1
+
+:target_ok
+pause
+
+".venv\Scripts\python.exe" --version >nul 2>&1
+if not errorlevel 1 goto run_venv
 
 echo.
-echo 移行処理が完了しました。
+echo [ERROR] The required .venv Python environment is missing or unusable.
+echo Run setup.bat before running this file.
 pause
+exit /b 1
+
+:run_venv
+echo Runtime: .venv
+".venv\Scripts\python.exe" ret_youyaku_html.py --migrate "%TARGET%"
+goto finished
+
+:finished
+set "RESULT=%ERRORLEVEL%"
+echo.
+if not "%RESULT%"=="0" goto failed
+echo Migration and template update completed.
+pause
+exit /b 0
+
+:failed
+echo [ERROR] Migration or update failed. Exit code: %RESULT%
+pause
+exit /b %RESULT%

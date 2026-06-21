@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="template-version" content="17">
+<meta name="template-version" content="20">
 <style>
 body{font-family:system-ui,"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;line-height:1.85;padding:1.2em;background:#121212;color:#e8e8e8;max-width:840px;margin:0 auto;box-sizing:border-box;font-size:17px;position:relative}
 h1{color:#ff9800;font-size:1.7em;border-bottom:1px solid #333;padding-bottom:.3em;margin-top:1.2em}
@@ -54,13 +54,18 @@ html{overflow-x:hidden}
 .global-video-close:hover{background:#444}
 .global-video-resize{position:absolute;z-index:3;left:-11px;bottom:-11px;width:28px;height:28px;border:1px solid #777;border-radius:50%;background:#202020;color:#ddd;font-size:15px;line-height:25px;padding:0;text-align:center;cursor:nesw-resize;user-select:none;touch-action:none;box-shadow:0 2px 8px rgba(0,0,0,.7)}
 .global-video-resize:hover{background:#444;color:#fff}
+.global-video-caption{position:absolute;z-index:4;left:0;right:0;top:calc(100% + 5px);display:none;justify-content:center;text-align:center;pointer-events:none;color:#d6c65a;font-size:clamp(13px,1.4vw,23px);font-weight:650;line-height:1.45;text-shadow:0 1px 2px #000}
+.global-video-caption.is-visible{display:flex}
+.global-video-caption-text{display:block;width:100%;box-sizing:border-box;padding:.3em .55em;border:1px solid #3a3a3a;border-radius:4px;background:rgba(12,12,12,.94);box-decoration-break:clone;-webkit-box-decoration-break:clone}
+.global-video-caption.is-hint{font-size:12px;color:#ddd}
+.global-video-caption.is-hint .global-video-caption-text{background:rgba(25,25,25,.86);border:1px solid rgba(255,255,255,.28)}
 .transcript-panel{position:fixed;z-index:200;top:12px;right:12px;bottom:12px;width:360px;display:flex;flex-direction:column;background:#181818;border:1px solid #353535;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.45);overflow:hidden;transform:translateX(calc(100% + 24px));transition:transform .2s ease}
 .transcript-panel.is-open{transform:translateX(0)}
 .transcript-header{height:48px;box-sizing:border-box;flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid #303030;background:#1d1d1d}
 .transcript-title{font-size:.95rem;font-weight:700;flex:1}
 .transcript-sync-label{font-size:.7rem;color:#888}
 .transcript-close{border:0;background:transparent;color:#aaa;font-size:24px;line-height:1;cursor:pointer;padding:4px 6px}
-.transcript-list{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:8px 7px 40vh;scrollbar-color:#666 transparent}
+.transcript-list{min-height:0;box-sizing:border-box;overflow-y:auto;overscroll-behavior:contain;padding:8px 7px 40vh;scrollbar-color:#666 transparent}
 .transcript-cue{display:grid;grid-template-columns:48px 1fr;gap:8px;color:#aaa;padding:8px;border-radius:8px;line-height:1.45;font-size:14px;transition:background .12s,color .12s}
 .transcript-cue:hover{color:#eee;background:#292929}
 .transcript-cue.is-active{color:#fff;background:#30353a}
@@ -160,8 +165,18 @@ html{overflow-x:hidden}
     profile: null,
     forceDocked: false,
     userWidth: null,
+    caption: null,
+    captionText: null,
+    captionStartTime: 0,
+    captionStartedAt: 0,
+    captionTimer: null,
+    captionFocusTimer: null,
+    awaitingPlaybackClick: false,
+    captionArmedAt: 0,
+    captionIndex: -1,
     scheduled: false
   };
+  var PLAYER_DOCK_TOP = 20;
   var keepActiveTranscriptVisible = function() {};
 
   function ensureGlobalVideoPlayer() {
@@ -218,14 +233,116 @@ html{overflow-x:hidden}
       resize.addEventListener('pointercancel', onEnd);
     });
 
+    var caption = document.createElement('div');
+    caption.className = 'global-video-caption';
+    caption.setAttribute('translate', 'yes');
+    caption.setAttribute('aria-live', 'off');
+    var captionText = document.createElement('span');
+    captionText.className = 'global-video-caption-text';
+    caption.appendChild(captionText);
+
     shell.appendChild(viewport);
+    shell.appendChild(caption);
     shell.appendChild(close);
     shell.appendChild(resize);
     document.body.appendChild(shell);
     globalVideo.shell = shell;
     globalVideo.viewport = viewport;
     globalVideo.iframe = iframe;
+    globalVideo.caption = caption;
+    globalVideo.captionText = captionText;
   }
+
+  function clearVideoCaptionTimers() {
+    if (globalVideo.captionTimer) window.clearInterval(globalVideo.captionTimer);
+    if (globalVideo.captionFocusTimer) window.clearInterval(globalVideo.captionFocusTimer);
+    globalVideo.captionTimer = null;
+    globalVideo.captionFocusTimer = null;
+  }
+
+  function setVideoCaption(text, hint) {
+    if (!globalVideo.caption || !globalVideo.captionText) return;
+    globalVideo.captionText.textContent = text || '';
+    globalVideo.caption.classList.toggle('is-visible', !!text);
+    globalVideo.caption.classList.toggle('is-hint', !!hint);
+    if (globalVideo.shell && globalVideo.shell.classList.contains('is-visible')) scheduleGlobalVideoPosition();
+  }
+
+  function renderVideoCaption(videoTime) {
+    var cues = data.transcript || [];
+    if (!cues.length) {
+      setVideoCaption('', false);
+      return;
+    }
+    var low = 0, high = cues.length - 1, found = -1;
+    while (low <= high) {
+      var mid = Math.floor((low + high) / 2);
+      if (Number(cues[mid].start) <= videoTime) { found = mid; low = mid + 1; }
+      else { high = mid - 1; }
+    }
+    if (found < 0) {
+      globalVideo.captionIndex = -1;
+      setVideoCaption('', false);
+      return;
+    }
+    var cue = cues[found];
+    var cueEnd = Number(cue.end);
+    if (!isFinite(cueEnd)) cueEnd = found + 1 < cues.length ? Number(cues[found + 1].start) : videoTime + 1;
+    if (videoTime > cueEnd + 0.15) {
+      globalVideo.captionIndex = -1;
+      setVideoCaption('', false);
+      return;
+    }
+    var transcriptText = document.querySelector('.transcript-cue[data-transcript-index="' + found + '"] .transcript-text');
+    var displayText = transcriptText && transcriptText.textContent.trim()
+      ? transcriptText.textContent.trim()
+      : (cue.text || '');
+    if (globalVideo.captionIndex !== found ||
+        !globalVideo.caption.classList.contains('is-visible') ||
+        globalVideo.captionText.textContent !== displayText) {
+      globalVideo.captionIndex = found;
+      setVideoCaption(displayText, false);
+    }
+  }
+
+  function startVideoCaptionClock() {
+    if (!globalVideo.awaitingPlaybackClick) return;
+    globalVideo.awaitingPlaybackClick = false;
+    if (globalVideo.captionFocusTimer) window.clearInterval(globalVideo.captionFocusTimer);
+    globalVideo.captionFocusTimer = null;
+    globalVideo.captionStartedAt = performance.now();
+    globalVideo.captionIndex = -1;
+    renderVideoCaption(globalVideo.captionStartTime);
+    globalVideo.captionTimer = window.setInterval(function() {
+      var elapsed = (performance.now() - globalVideo.captionStartedAt) / 1000;
+      renderVideoCaption(globalVideo.captionStartTime + elapsed);
+    }, 160);
+  }
+
+  function checkVideoIframeFocus() {
+    if (!globalVideo.awaitingPlaybackClick || !globalVideo.iframe) return;
+    if (Date.now() - globalVideo.captionArmedAt < 300) return;
+    if (document.activeElement === globalVideo.iframe) startVideoCaptionClock();
+  }
+
+  function armVideoCaption(startTime) {
+    clearVideoCaptionTimers();
+    globalVideo.captionStartTime = Math.max(0, Number(startTime) || 0);
+    globalVideo.captionStartedAt = 0;
+    globalVideo.captionIndex = -1;
+    globalVideo.awaitingPlaybackClick = !!(data.transcript && data.transcript.length);
+    globalVideo.captionArmedAt = Date.now();
+    if (!globalVideo.awaitingPlaybackClick) {
+      setVideoCaption('', false);
+      return;
+    }
+    setVideoCaption('iframe内の再生ボタンを押すと字幕を開始します', true);
+    globalVideo.captionFocusTimer = window.setInterval(checkVideoIframeFocus, 160);
+  }
+
+  window.addEventListener('blur', function() {
+    window.setTimeout(checkVideoIframeFocus, 0);
+  });
 
   function setIframeProfile(profile) {
     if (profile.kind === 'filmstrip') {
@@ -262,13 +379,16 @@ html{overflow-x:hidden}
       var transcriptVisible = window.innerWidth >= 1280 || transcript.classList.contains('is-open');
       if (transcriptVisible && list && rightBoundary > transcriptRect.left) {
         var listRect = list.getBoundingClientRect();
-        var maximumBottom = listRect.bottom - activeCue.getBoundingClientRect().height - 20;
-        maximumWidth = Math.min(maximumWidth, Math.max(240, (maximumBottom - 48) * 16 / 9));
+        var captionHeight = globalVideo.caption && globalVideo.caption.classList.contains('is-visible')
+          ? globalVideo.caption.getBoundingClientRect().height + 5
+          : 0;
+        var maximumBottom = listRect.bottom - activeCue.getBoundingClientRect().height - 20 - captionHeight;
+        maximumWidth = Math.min(maximumWidth, Math.max(240, (maximumBottom - PLAYER_DOCK_TOP) * 16 / 9));
       }
     }
     var dockWidth = Math.min(requestedWidth, maximumWidth);
     var dockHeight = dockWidth * 9 / 16;
-    setPlayerBox(rightBoundary - dockWidth, 48, dockWidth, dockHeight, true);
+    setPlayerBox(rightBoundary - dockWidth, PLAYER_DOCK_TOP, dockWidth, dockHeight, true);
   }
 
   function updateGlobalVideoPosition() {
@@ -321,7 +441,7 @@ html{overflow-x:hidden}
     window.requestAnimationFrame(updateGlobalVideoPosition);
   }
 
-  function startGlobalVideo(source, url, profile, forceDocked) {
+  function startGlobalVideo(source, url, profile, forceDocked, startTime) {
     ensureGlobalVideoPlayer();
     forceDocked = !!forceDocked;
     if (globalVideo.source === source && globalVideo.iframe.src === url && globalVideo.forceDocked === forceDocked) return;
@@ -333,6 +453,7 @@ html{overflow-x:hidden}
     setIframeProfile(profile);
     globalVideo.shell.classList.add('is-visible');
     updateGlobalVideoPosition();
+    armVideoCaption(startTime);
     // サイズ確定後に特殊watch URLを読み込む。autoplay指定は付けない。
     globalVideo.iframe.src = url;
   }
@@ -342,11 +463,15 @@ html{overflow-x:hidden}
     globalVideo.source = null;
     globalVideo.profile = null;
     globalVideo.forceDocked = false;
+    globalVideo.awaitingPlaybackClick = false;
+    clearVideoCaptionTimers();
+    setVideoCaption('', false);
     if (globalVideo.iframe) globalVideo.iframe.src = '';
     if (globalVideo.shell) {
       globalVideo.shell.classList.remove('is-visible');
       globalVideo.shell.classList.remove('is-docked');
     }
+    keepActiveTranscriptVisible();
   }
 
   window.addEventListener('scroll', scheduleGlobalVideoPosition, { passive: true });
@@ -373,7 +498,7 @@ html{overflow-x:hidden}
         profile.origin = nearest.getAttribute('data-player-origin') || 'center';
       }
     }
-    startGlobalVideo(nearest, makeVideoLink(baseUrl, Math.floor(timestampSec)), profile, true);
+    startGlobalVideo(nearest, makeVideoLink(baseUrl, Math.floor(timestampSec)), profile, true, timestampSec);
   }
 
   // --- タブタイトルをh1見出しから設定 ---
@@ -518,7 +643,7 @@ html{overflow-x:hidden}
           startGlobalVideo(this, this.getAttribute('data-url'), {
             kind: 'grid',
             origin: this.getAttribute('data-player-origin')
-          });
+          }, false, Number(this.getAttribute('data-thumb-start')));
         });
       }
       sectionDiv.appendChild(gridDiv);
@@ -674,17 +799,28 @@ html{overflow-x:hidden}
     var manualUntil = 0;
     var scheduled = false;
     keepActiveTranscriptVisible = function() {
-      if (activeIndex < 0 || !globalVideo.shell || !globalVideo.shell.classList.contains('is-visible')) return;
+      if (activeIndex < 0 || !globalVideo.shell || !globalVideo.shell.classList.contains('is-visible')) {
+        list.style.paddingTop = '8px';
+        return;
+      }
       var panelRect = panel.getBoundingClientRect();
       var playerRect = globalVideo.shell.getBoundingClientRect();
+      var obstructionBottom = playerRect.bottom;
+      if (globalVideo.caption && globalVideo.caption.classList.contains('is-visible')) {
+        obstructionBottom = Math.max(obstructionBottom, globalVideo.caption.getBoundingClientRect().bottom);
+      }
       var listRect = list.getBoundingClientRect();
       var overlapsHorizontally = playerRect.right > panelRect.left && playerRect.left < panelRect.right;
-      var overlapsList = playerRect.bottom > listRect.top && playerRect.top < listRect.bottom;
-      if (!overlapsHorizontally || !overlapsList) return;
+      var overlapsList = obstructionBottom > listRect.top && playerRect.top < listRect.bottom;
+      if (!overlapsHorizontally || !overlapsList) {
+        list.style.paddingTop = '8px';
+        return;
+      }
 
       var active = cueElements[activeIndex];
+      var safeTop = Math.max(listRect.top + 8, obstructionBottom + 12);
+      list.style.paddingTop = Math.max(8, safeTop - listRect.top) + 'px';
       var activeRect = active.getBoundingClientRect();
-      var safeTop = Math.max(listRect.top + 8, playerRect.bottom + 12);
       var latestTop = listRect.bottom - activeRect.height - 8;
       var targetTop = Math.min(safeTop, latestTop);
       if (activeRect.top < safeTop || activeRect.bottom > listRect.bottom - 8) {
@@ -805,7 +941,7 @@ html{overflow-x:hidden}
 
       frame.addEventListener('click', function(e) {
         e.preventDefault();
-        startGlobalVideo(this, this.getAttribute('data-url'), { kind: 'filmstrip' });
+        startGlobalVideo(this, this.getAttribute('data-url'), { kind: 'filmstrip' }, false, Number(this.getAttribute('data-thumb-start')));
       });
 
       rail.appendChild(frame);

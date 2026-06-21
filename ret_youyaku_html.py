@@ -1708,6 +1708,7 @@ if __name__ == "__main__":
         # 移行モード: python ret_youyaku_html.py --migrate [base_dir]
         base = sys.argv[2] if len(sys.argv) >= 3 else r"C:\temp\html"
         migrate_legacy_html(base)
+        update_templates(base)
     elif len(sys.argv) >= 3:
         vtt_path = sys.argv[1]
         video_title = sys.argv[2]
