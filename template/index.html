@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="template-version" content="20">
+<meta name="template-version" content="21">
 <style>
 body{font-family:system-ui,"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;line-height:1.85;padding:1.2em;background:#121212;color:#e8e8e8;max-width:840px;margin:0 auto;box-sizing:border-box;font-size:17px;position:relative}
 h1{color:#ff9800;font-size:1.7em;border-bottom:1px solid #333;padding-bottom:.3em;margin-top:1.2em}
@@ -82,7 +82,7 @@ html{overflow-x:hidden}
 <script src="data.js"></script>
 <script>if(typeof PAGE_DATA!=='undefined'&&PAGE_DATA.title)document.title=PAGE_DATA.title;</script>
 </head>
-<body>
+<body translate="no">
 <script>
 (function() {
   // --- CONFIG: 表示側で加工する設定 ---
@@ -550,6 +550,7 @@ html{overflow-x:hidden}
     if (!data.description) return null;
     var descDiv = document.createElement('div');
     descDiv.className = 'description-block';
+    descDiv.setAttribute('translate', 'yes');
     var descLines = data.description.split('\n');
     var VISIBLE_LINES = 5;
     var visibleDiv = document.createElement('div');
@@ -690,6 +691,7 @@ html{overflow-x:hidden}
 
     var panel = document.createElement('aside');
     panel.className = 'transcript-panel';
+    panel.setAttribute('translate', 'yes');
     panel.setAttribute('aria-label', '字幕タイムライン');
 
     var header = document.createElement('div');
