@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="template-version" content="13">
+<meta name="template-version" content="17">
 <style>
 body{font-family:system-ui,"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;line-height:1.85;padding:1.2em;background:#121212;color:#e8e8e8;max-width:840px;margin:0 auto;box-sizing:border-box;font-size:17px;position:relative}
 h1{color:#ff9800;font-size:1.7em;border-bottom:1px solid #333;padding-bottom:.3em;margin-top:1.2em}
@@ -45,13 +45,15 @@ html{overflow-x:hidden}
 .filmstrip-frame img{width:100%;height:100%;object-fit:cover;display:block}
 .filmstrip-frame::after{content:'▶';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,255,255,.5);font-size:13px;background:rgba(0,0,0,.4);padding:1px 6px;border-radius:50%;pointer-events:none}
 .thumb-container.is-playing::after,.filmstrip-frame.is-playing::after{content:'再生中';font-size:11px;padding:3px 7px}
-.global-video-player{position:fixed;z-index:180;display:none;background:#000;border-radius:6px;box-shadow:0 8px 28px rgba(0,0,0,.65)}
+.global-video-player{position:fixed;z-index:210;display:none;background:#000;border-radius:6px;box-shadow:0 8px 28px rgba(0,0,0,.65)}
 .global-video-player.is-visible{display:block}
 .global-video-player.is-docked{box-shadow:0 10px 36px rgba(0,0,0,.8),0 0 0 1px #555}
 .global-video-viewport{position:absolute;inset:0;overflow:hidden;border-radius:6px;background:#000}
 .global-video-player iframe{position:absolute;top:0;left:0;border:0;border-radius:6px;transform-origin:top left}
 .global-video-close{position:absolute;z-index:3;top:-11px;right:-11px;width:28px;height:28px;border:1px solid #777;border-radius:50%;background:#202020;color:#fff;font-size:20px;line-height:24px;padding:0;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.7)}
 .global-video-close:hover{background:#444}
+.global-video-resize{position:absolute;z-index:3;left:-11px;bottom:-11px;width:28px;height:28px;border:1px solid #777;border-radius:50%;background:#202020;color:#ddd;font-size:15px;line-height:25px;padding:0;text-align:center;cursor:nesw-resize;user-select:none;touch-action:none;box-shadow:0 2px 8px rgba(0,0,0,.7)}
+.global-video-resize:hover{background:#444;color:#fff}
 .transcript-panel{position:fixed;z-index:200;top:12px;right:12px;bottom:12px;width:360px;display:flex;flex-direction:column;background:#181818;border:1px solid #353535;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.45);overflow:hidden;transform:translateX(calc(100% + 24px));transition:transform .2s ease}
 .transcript-panel.is-open{transform:translateX(0)}
 .transcript-header{height:48px;box-sizing:border-box;flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid #303030;background:#1d1d1d}
@@ -156,8 +158,11 @@ html{overflow-x:hidden}
     iframe: null,
     source: null,
     profile: null,
+    forceDocked: false,
+    userWidth: null,
     scheduled: false
   };
+  var keepActiveTranscriptVisible = function() {};
 
   function ensureGlobalVideoPlayer() {
     if (globalVideo.shell) return;
@@ -184,8 +189,38 @@ html{overflow-x:hidden}
       stopGlobalVideo();
     });
 
+    var resize = document.createElement('div');
+    resize.className = 'global-video-resize';
+    resize.setAttribute('role', 'button');
+    resize.setAttribute('aria-label', '動画プレイヤーの大きさを変更');
+    resize.title = 'ドラッグして大きさを変更';
+    resize.textContent = '↙';
+    resize.addEventListener('pointerdown', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var startX = e.clientX;
+      var startWidth = shell.getBoundingClientRect().width;
+      resize.setPointerCapture(e.pointerId);
+
+      function onMove(moveEvent) {
+        var requestedWidth = startWidth + (startX - moveEvent.clientX);
+        globalVideo.userWidth = Math.max(240, requestedWidth);
+        updateGlobalVideoPosition();
+      }
+      function onEnd(endEvent) {
+        resize.releasePointerCapture(endEvent.pointerId);
+        resize.removeEventListener('pointermove', onMove);
+        resize.removeEventListener('pointerup', onEnd);
+        resize.removeEventListener('pointercancel', onEnd);
+      }
+      resize.addEventListener('pointermove', onMove);
+      resize.addEventListener('pointerup', onEnd);
+      resize.addEventListener('pointercancel', onEnd);
+    });
+
     shell.appendChild(viewport);
     shell.appendChild(close);
+    shell.appendChild(resize);
     document.body.appendChild(shell);
     globalVideo.shell = shell;
     globalVideo.viewport = viewport;
@@ -211,11 +246,39 @@ html{overflow-x:hidden}
     shell.style.width = Math.round(width) + 'px';
     shell.style.height = Math.round(height) + 'px';
     shell.classList.toggle('is-docked', docked);
+    keepActiveTranscriptVisible();
+  }
+
+  function dockGlobalVideoPlayer() {
+    var rightBoundary = window.innerWidth - 16;
+    var availableWidth = Math.max(1, rightBoundary - 16);
+    var requestedWidth = globalVideo.userWidth || 480;
+    var maximumWidth = availableWidth;
+    var transcript = document.querySelector('.transcript-panel');
+    var activeCue = document.querySelector('.transcript-cue.is-active');
+    if (transcript && activeCue) {
+      var transcriptRect = transcript.getBoundingClientRect();
+      var list = transcript.querySelector('.transcript-list');
+      var transcriptVisible = window.innerWidth >= 1280 || transcript.classList.contains('is-open');
+      if (transcriptVisible && list && rightBoundary > transcriptRect.left) {
+        var listRect = list.getBoundingClientRect();
+        var maximumBottom = listRect.bottom - activeCue.getBoundingClientRect().height - 20;
+        maximumWidth = Math.min(maximumWidth, Math.max(240, (maximumBottom - 48) * 16 / 9));
+      }
+    }
+    var dockWidth = Math.min(requestedWidth, maximumWidth);
+    var dockHeight = dockWidth * 9 / 16;
+    setPlayerBox(rightBoundary - dockWidth, 48, dockWidth, dockHeight, true);
   }
 
   function updateGlobalVideoPosition() {
     globalVideo.scheduled = false;
-    if (!globalVideo.source || !globalVideo.shell) return;
+    if (!globalVideo.shell) return;
+    if (globalVideo.forceDocked) {
+      dockGlobalVideoPlayer();
+      return;
+    }
+    if (!globalVideo.source) return;
     if (!document.documentElement.contains(globalVideo.source)) {
       stopGlobalVideo();
       return;
@@ -225,11 +288,12 @@ html{overflow-x:hidden}
     var profile = globalVideo.profile;
     var desired;
     if (profile.kind === 'filmstrip') {
-      desired = { left: rect.left, top: rect.top, width: rect.width * 3, height: rect.height * 3 };
+      var filmWidth = globalVideo.userWidth || rect.width * 3;
+      desired = { left: rect.left, top: rect.top, width: filmWidth, height: filmWidth * 9 / 16 };
     } else {
       var scale = 1.8;
-      var width = rect.width * scale;
-      var height = rect.height * scale;
+      var width = globalVideo.userWidth || rect.width * scale;
+      var height = width * 9 / 16;
       var extraWidth = width - rect.width;
       var left = rect.left;
       if (profile.origin === 'center') left -= extraWidth / 2;
@@ -245,29 +309,27 @@ html{overflow-x:hidden}
     var sourceOutside = rect.bottom <= 0 || rect.top >= window.innerHeight || rect.right <= 0 || rect.left >= window.innerWidth;
     var docked = sourceOutside || desired.top < 12;
     if (docked) {
-      var rightSpace = window.innerWidth >= 1280 ? 400 : 16;
-      var availableWidth = Math.max(240, window.innerWidth - rightSpace - 16);
-      var dockWidth = Math.min(480, availableWidth);
-      var dockHeight = dockWidth * 9 / 16;
-      setPlayerBox(window.innerWidth - rightSpace - dockWidth, 12, dockWidth, dockHeight, true);
+      dockGlobalVideoPlayer();
     } else {
       setPlayerBox(desired.left, desired.top, desired.width, desired.height, false);
     }
   }
 
   function scheduleGlobalVideoPosition() {
-    if (!globalVideo.source || globalVideo.scheduled) return;
+    if (!globalVideo.shell || !globalVideo.shell.classList.contains('is-visible') || globalVideo.scheduled) return;
     globalVideo.scheduled = true;
     window.requestAnimationFrame(updateGlobalVideoPosition);
   }
 
-  function startGlobalVideo(source, url, profile) {
+  function startGlobalVideo(source, url, profile, forceDocked) {
     ensureGlobalVideoPlayer();
-    if (globalVideo.source === source && globalVideo.iframe.src === url) return;
+    forceDocked = !!forceDocked;
+    if (globalVideo.source === source && globalVideo.iframe.src === url && globalVideo.forceDocked === forceDocked) return;
     if (globalVideo.source) globalVideo.source.classList.remove('is-playing');
     globalVideo.source = source;
     globalVideo.profile = profile;
-    source.classList.add('is-playing');
+    globalVideo.forceDocked = forceDocked;
+    if (source) source.classList.add('is-playing');
     setIframeProfile(profile);
     globalVideo.shell.classList.add('is-visible');
     updateGlobalVideoPosition();
@@ -279,6 +341,7 @@ html{overflow-x:hidden}
     if (globalVideo.source) globalVideo.source.classList.remove('is-playing');
     globalVideo.source = null;
     globalVideo.profile = null;
+    globalVideo.forceDocked = false;
     if (globalVideo.iframe) globalVideo.iframe.src = '';
     if (globalVideo.shell) {
       globalVideo.shell.classList.remove('is-visible');
@@ -288,6 +351,30 @@ html{overflow-x:hidden}
 
   window.addEventListener('scroll', scheduleGlobalVideoPosition, { passive: true });
   window.addEventListener('resize', scheduleGlobalVideoPosition);
+
+  function startGlobalVideoAtTime(timestampSec) {
+    var candidates = document.querySelectorAll('[data-thumb-start]');
+    var nearest = null;
+    var nearestDistance = Infinity;
+    for (var i = 0; i < candidates.length; i++) {
+      var candidateTime = Number(candidates[i].getAttribute('data-thumb-start'));
+      var distance = Math.abs(candidateTime - timestampSec);
+      if (distance < nearestDistance) {
+        nearest = candidates[i];
+        nearestDistance = distance;
+      }
+    }
+
+    var profile = { kind: 'grid', origin: 'center' };
+    if (nearest) {
+      if (nearest.classList.contains('filmstrip-frame')) {
+        profile = { kind: 'filmstrip' };
+      } else {
+        profile.origin = nearest.getAttribute('data-player-origin') || 'center';
+      }
+    }
+    startGlobalVideo(nearest, makeVideoLink(baseUrl, Math.floor(timestampSec)), profile, true);
+  }
 
   // --- タブタイトルをh1見出しから設定 ---
   if (!data.title) {
@@ -415,6 +502,7 @@ html{overflow-x:hidden}
         var container = document.createElement('div');
         container.className = 'thumb-container';
         container.setAttribute('data-url', clickUrl);
+        container.setAttribute('data-thumb-start', startSec);
         container.setAttribute('data-player-origin', j % 3 === 0 ? 'left' : (j % 3 === 1 ? 'center' : 'right'));
 
         var thumbImg = document.createElement('img');
@@ -441,8 +529,12 @@ html{overflow-x:hidden}
       var linkP = document.createElement('p');
       var linkA = document.createElement('a');
       linkA.href = makeVideoLink(baseUrl, sec.timestamp);
-      linkA.target = '_blank';
+      linkA.setAttribute('data-video-time', sec.timestamp);
       linkA.textContent = '▶ 動画：' + formatTimestamp(sec.timestamp);
+      linkA.addEventListener('click', function(e) {
+        e.preventDefault();
+        startGlobalVideoAtTime(Number(this.getAttribute('data-video-time')));
+      });
       linkP.appendChild(linkA);
       sectionDiv.appendChild(linkP);
     }
@@ -513,9 +605,13 @@ html{overflow-x:hidden}
       var row = document.createElement('a');
       row.className = 'transcript-cue' + (boundaryIndexes[ci] ? ' is-section-start' : '');
       row.href = makeVideoLink(baseUrl, Math.floor(cue.start));
-      row.target = '_blank';
-      row.rel = 'noopener';
       row.setAttribute('data-transcript-index', ci);
+      row.setAttribute('data-cue-start', cue.start);
+      row.addEventListener('click', function(e) {
+        e.preventDefault();
+        if (window.innerWidth < 1280) setPanelOpen(false);
+        startGlobalVideoAtTime(Number(this.getAttribute('data-cue-start')));
+      });
       var time = document.createElement('span');
       time.className = 'transcript-time';
       time.textContent = formatClock(cue.start);
@@ -577,6 +673,24 @@ html{overflow-x:hidden}
     var activeIndex = -1;
     var manualUntil = 0;
     var scheduled = false;
+    keepActiveTranscriptVisible = function() {
+      if (activeIndex < 0 || !globalVideo.shell || !globalVideo.shell.classList.contains('is-visible')) return;
+      var panelRect = panel.getBoundingClientRect();
+      var playerRect = globalVideo.shell.getBoundingClientRect();
+      var listRect = list.getBoundingClientRect();
+      var overlapsHorizontally = playerRect.right > panelRect.left && playerRect.left < panelRect.right;
+      var overlapsList = playerRect.bottom > listRect.top && playerRect.top < listRect.bottom;
+      if (!overlapsHorizontally || !overlapsList) return;
+
+      var active = cueElements[activeIndex];
+      var activeRect = active.getBoundingClientRect();
+      var safeTop = Math.max(listRect.top + 8, playerRect.bottom + 12);
+      var latestTop = listRect.bottom - activeRect.height - 8;
+      var targetTop = Math.min(safeTop, latestTop);
+      if (activeRect.top < safeTop || activeRect.bottom > listRect.bottom - 8) {
+        list.scrollTop = Math.max(0, list.scrollTop + activeRect.top - targetTop);
+      }
+    };
     function syncTranscript() {
       scheduled = false;
       var markerY = window.pageYOffset + window.innerHeight * 0.3;
@@ -594,6 +708,7 @@ html{overflow-x:hidden}
       if (Date.now() >= manualUntil) {
         list.scrollTop = Math.max(0, cueElements[activeIndex].offsetTop - list.clientHeight * 0.3);
       }
+      keepActiveTranscriptVisible();
     }
 
     function scheduleSync() {
@@ -680,6 +795,7 @@ html{overflow-x:hidden}
       frame.className = 'filmstrip-frame';
       frame.style.top = (y - railTop) + 'px';
       frame.setAttribute('data-url', makeVideoLink(baseUrl, Math.floor(f.start)));
+      frame.setAttribute('data-thumb-start', f.start);
       var im = document.createElement('img');
       im.src = f.src;
       im.loading = 'lazy';
