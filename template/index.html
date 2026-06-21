@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="template-version" content="11">
+<meta name="template-version" content="12">
 <style>
 body{font-family:system-ui,"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;line-height:1.85;padding:1.2em;background:#121212;color:#e8e8e8;max-width:840px;margin:0 auto;box-sizing:border-box;font-size:17px;position:relative}
 h1{color:#ff9800;font-size:1.7em;border-bottom:1px solid #333;padding-bottom:.3em;margin-top:1.2em}
@@ -25,13 +25,6 @@ a{color:#4fc3f7;text-decoration:none}
 .jump-link{background:#333;padding:10px;margin:10px 0;border-radius:5px;text-align:center}
 .detail-section{border-top:2px solid #666;margin-top:2em;padding-top:2em}
 .video-thumbnail{max-width:640px;width:100%;border-radius:8px;margin:1em 0;box-shadow:0 4px 8px rgba(0,0,0,.3)}
-details.subtitle-toggle{margin:1em 0;background:#1e1e1e;border-radius:6px;border:1px solid #333}
-details.subtitle-toggle summary{cursor:pointer;padding:8px 12px;color:#aaa;font-size:0.9em;user-select:none}
-details.subtitle-toggle summary:hover{color:#fff;background:#2a2a2a}
-details.subtitle-toggle[open] summary{border-bottom:1px solid #333}
-.subtitle-content{padding:12px 16px;color:#ccc;font-size:0.9em;line-height:1.8em;white-space:pre-wrap;max-height:400px;overflow-y:auto}
-.ai-summary-link{margin-left:1em;color:#4fc3f7;font-size:0.85em;padding:2px 8px;background:#2a2a2a;border-radius:4px}
-.ai-summary-link:hover{background:#3a3a3a;color:#fff}
 .description-block{background:#1a1a1a;border:1px solid #333;border-radius:6px;padding:12px 16px;margin:1em 0;font-size:0.88em;color:#bbb;line-height:1.7em}
 .description-block a{color:#4fc3f7}
 .desc-visible{white-space:pre-wrap}
@@ -49,8 +42,25 @@ html{overflow-x:hidden}
 .filmstrip-frame:hover{width:444px;height:249px;z-index:30}
 .filmstrip-frame img{width:100%;height:100%;object-fit:cover;display:block}
 .filmstrip-frame::after{content:'▶';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,255,255,.5);font-size:13px;background:rgba(0,0,0,.4);padding:1px 6px;border-radius:50%;pointer-events:none}
+.transcript-panel{position:fixed;z-index:200;top:12px;right:12px;bottom:12px;width:360px;display:flex;flex-direction:column;background:#181818;border:1px solid #353535;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.45);overflow:hidden;transform:translateX(calc(100% + 24px));transition:transform .2s ease}
+.transcript-panel.is-open{transform:translateX(0)}
+.transcript-header{height:48px;box-sizing:border-box;flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid #303030;background:#1d1d1d}
+.transcript-title{font-size:.95rem;font-weight:700;flex:1}
+.transcript-sync-label{font-size:.7rem;color:#888}
+.transcript-close{border:0;background:transparent;color:#aaa;font-size:24px;line-height:1;cursor:pointer;padding:4px 6px}
+.transcript-list{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:8px 7px 40vh;scrollbar-color:#666 transparent}
+.transcript-cue{display:grid;grid-template-columns:48px 1fr;gap:8px;color:#aaa;padding:8px;border-radius:8px;line-height:1.45;font-size:14px;transition:background .12s,color .12s}
+.transcript-cue:hover{color:#eee;background:#292929}
+.transcript-cue.is-active{color:#fff;background:#30353a}
+.transcript-cue.is-section-start{margin-top:8px;border-top:1px solid #383838;border-radius:0 0 8px 8px;padding-top:14px}
+.transcript-time{align-self:start;justify-self:start;color:#aaa;background:#353535;border-radius:10px;padding:1px 6px;font-size:11px;line-height:1.5;font-variant-numeric:tabular-nums}
+.transcript-cue.is-active .transcript-time{background:#174d70;color:#bfe7ff}
+.transcript-text{min-width:0}
+.transcript-toggle{position:fixed;z-index:190;right:14px;bottom:14px;border:1px solid #555;border-radius:22px;background:#242424;color:#eee;padding:9px 14px;box-shadow:0 4px 16px rgba(0,0,0,.4);cursor:pointer}
 @media (max-width:1180px){.filmstrip-rail{display:none}}
 @media (min-width:1181px){body{max-width:none;margin-left:220px;margin-right:24px}}
+@media (min-width:1280px){body{margin-right:400px}.transcript-panel{transform:none}.transcript-toggle,.transcript-close{display:none}}
+@media (max-width:1279px){body.transcript-open{overflow:hidden}.transcript-panel{top:8px;right:8px;bottom:8px;width:min(360px,calc(100vw - 16px))}}
 </style>
 <script src="data.js"></script>
 <script>if(typeof PAGE_DATA!=='undefined'&&PAGE_DATA.title)document.title=PAGE_DATA.title;</script>
@@ -308,27 +318,6 @@ html{overflow-x:hidden}
       sectionDiv.appendChild(linkP);
     }
 
-    // 字幕トグル
-    if (sec.subtitle) {
-      var details = document.createElement('details');
-      details.className = 'subtitle-toggle';
-      var summary = document.createElement('summary');
-      summary.textContent = '字幕 ';
-      var aiLink = document.createElement('a');
-      aiLink.href = makeChatGptUrl(sec.subtitle);
-      aiLink.target = '_blank';
-      aiLink.className = 'ai-summary-link';
-      aiLink.textContent = 'AIで要約（' + sec.subtitle.length + '文字）';
-      aiLink.onclick = function(e) { e.stopPropagation(); };
-      summary.appendChild(aiLink);
-      details.appendChild(summary);
-      var contentDiv = document.createElement('div');
-      contentDiv.className = 'subtitle-content';
-      contentDiv.textContent = sec.subtitle;
-      details.appendChild(contentDiv);
-      sectionDiv.appendChild(details);
-    }
-
     document.body.appendChild(sectionDiv);
 
     // タイトルセクションの直後に description を挿入
@@ -347,6 +336,163 @@ html{overflow-x:hidden}
     detailDiv.innerHTML = '<h2>📄 詳細内容</h2>' + data.detail;
     document.body.appendChild(detailDiv);
   }
+
+  // --- 右レール：見出し時刻と緩く同期する字幕タイムライン ---
+  function buildTranscript() {
+    var cues = data.transcript || [];
+    if (!cues.length) return;
+
+    var panel = document.createElement('aside');
+    panel.className = 'transcript-panel';
+    panel.setAttribute('aria-label', '字幕タイムライン');
+
+    var header = document.createElement('div');
+    header.className = 'transcript-header';
+    var titleEl = document.createElement('div');
+    titleEl.className = 'transcript-title';
+    titleEl.textContent = '字幕';
+    var syncLabel = document.createElement('span');
+    syncLabel.className = 'transcript-sync-label';
+    syncLabel.textContent = '本文と同期';
+    var closeButton = document.createElement('button');
+    closeButton.className = 'transcript-close';
+    closeButton.type = 'button';
+    closeButton.setAttribute('aria-label', '字幕を閉じる');
+    closeButton.textContent = '×';
+    header.appendChild(titleEl);
+    header.appendChild(syncLabel);
+    header.appendChild(closeButton);
+    panel.appendChild(header);
+
+    var list = document.createElement('div');
+    list.className = 'transcript-list';
+    var sectionTimes = [];
+    for (var si = 0; si < data.sections.length; si++) {
+      if (data.sections[si].timestamp != null) sectionTimes.push(Number(data.sections[si].timestamp));
+    }
+    sectionTimes.sort(function(a, b) { return a - b; });
+    var boundaryIndexes = {};
+    var cueIndex = 0;
+    for (var st = 0; st < sectionTimes.length; st++) {
+      while (cueIndex < cues.length - 1 && Number(cues[cueIndex].start) < sectionTimes[st]) cueIndex++;
+      boundaryIndexes[cueIndex] = true;
+    }
+
+    var cueElements = [];
+    for (var ci = 0; ci < cues.length; ci++) {
+      var cue = cues[ci];
+      var row = document.createElement('a');
+      row.className = 'transcript-cue' + (boundaryIndexes[ci] ? ' is-section-start' : '');
+      row.href = makeVideoLink(baseUrl, Math.floor(cue.start));
+      row.target = '_blank';
+      row.rel = 'noopener';
+      row.setAttribute('data-transcript-index', ci);
+      var time = document.createElement('span');
+      time.className = 'transcript-time';
+      time.textContent = formatClock(cue.start);
+      var textEl = document.createElement('span');
+      textEl.className = 'transcript-text';
+      textEl.textContent = cue.text;
+      row.appendChild(time);
+      row.appendChild(textEl);
+      list.appendChild(row);
+      cueElements.push(row);
+    }
+    panel.appendChild(list);
+    document.body.appendChild(panel);
+
+    var toggle = document.createElement('button');
+    toggle.className = 'transcript-toggle';
+    toggle.type = 'button';
+    toggle.textContent = '字幕';
+    toggle.setAttribute('aria-label', '字幕タイムラインを開く');
+    document.body.appendChild(toggle);
+
+    function setPanelOpen(open) {
+      panel.classList.toggle('is-open', open);
+      document.body.classList.toggle('transcript-open', open);
+    }
+    toggle.addEventListener('click', function() { setPanelOpen(true); });
+    closeButton.addEventListener('click', function() { setPanelOpen(false); });
+
+    var anchors = [];
+    function rebuildAnchors() {
+      anchors = [];
+      var hs = document.querySelectorAll('[data-ts]');
+      for (var hi = 0; hi < hs.length; hi++) {
+        var anchorTime = parseFloat(hs[hi].getAttribute('data-ts'));
+        if (isNaN(anchorTime)) continue;
+        anchors.push({
+          t: anchorTime,
+          y: hs[hi].getBoundingClientRect().top + window.pageYOffset
+        });
+      }
+      anchors.sort(function(a, b) { return a.t - b.t; });
+      if (!anchors.length) return;
+      var endTime = Math.max(Number(data.duration) || 0, Number(cues[cues.length - 1].end) || 0, anchors[anchors.length - 1].t + 1);
+      anchors.push({ t: endTime, y: Math.max(document.documentElement.scrollHeight, anchors[anchors.length - 1].y + 1) });
+    }
+
+    function yToTime(y) {
+      if (!anchors.length) return 0;
+      if (y <= anchors[0].y) return anchors[0].t;
+      for (var ai = 0; ai < anchors.length - 1; ai++) {
+        var a = anchors[ai], b = anchors[ai + 1];
+        if (y >= a.y && y <= b.y) {
+          return b.y === a.y ? a.t : a.t + (y - a.y) / (b.y - a.y) * (b.t - a.t);
+        }
+      }
+      return anchors[anchors.length - 1].t;
+    }
+
+    var activeIndex = -1;
+    var manualUntil = 0;
+    var scheduled = false;
+    function syncTranscript() {
+      scheduled = false;
+      var markerY = window.pageYOffset + window.innerHeight * 0.3;
+      var currentTime = yToTime(markerY);
+      var low = 0, high = cues.length - 1, found = 0;
+      while (low <= high) {
+        var mid = Math.floor((low + high) / 2);
+        if (Number(cues[mid].start) <= currentTime) { found = mid; low = mid + 1; }
+        else { high = mid - 1; }
+      }
+      if (found === activeIndex) return;
+      if (activeIndex >= 0) cueElements[activeIndex].classList.remove('is-active');
+      activeIndex = found;
+      cueElements[activeIndex].classList.add('is-active');
+      if (Date.now() >= manualUntil) {
+        list.scrollTop = Math.max(0, cueElements[activeIndex].offsetTop - list.clientHeight * 0.3);
+      }
+    }
+
+    function scheduleSync() {
+      if (scheduled) return;
+      scheduled = true;
+      window.requestAnimationFrame(syncTranscript);
+    }
+    function pauseAutoSync() { manualUntil = Date.now() + 4000; }
+    list.addEventListener('wheel', pauseAutoSync, { passive: true });
+    list.addEventListener('pointerdown', pauseAutoSync);
+    list.addEventListener('touchstart', pauseAutoSync, { passive: true });
+    window.addEventListener('scroll', scheduleSync, { passive: true });
+    window.addEventListener('resize', function() { rebuildAnchors(); scheduleSync(); });
+    window.addEventListener('load', function() { rebuildAnchors(); scheduleSync(); });
+    rebuildAnchors();
+    scheduleSync();
+  }
+
+  function formatClock(sec) {
+    sec = Math.max(0, Math.floor(Number(sec) || 0));
+    var h = Math.floor(sec / 3600);
+    var m = Math.floor((sec % 3600) / 60);
+    var s = sec % 60;
+    if (h) return h + ':' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+    return m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  buildTranscript();
 
   // --- 左レール：全ストーリーボードを時刻で本文に合わせて並べる ---
   function buildFilmstrip() {

@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import html
 import shutil
 import glob
 import hashlib
@@ -875,11 +876,121 @@ def markdown_to_html(text):
     
     return '\n'.join(html_lines)
 
+
+def _clean_transcript_text(text):
+    """VTTの装飾タグを除去し、表示用の一行テキストにする。"""
+    text = html.unescape(str(text or ""))
+    text = re.sub(r'<[^>]+>', '', text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def _join_transcript_text(base, addition):
+    """ローリング字幕の重複を除去しつつ断片を連結する。"""
+    if not base:
+        return addition
+    if not addition or base.endswith(addition):
+        return base
+
+    max_overlap = min(len(base), len(addition), 80)
+    for overlap in range(max_overlap, 2, -1):
+        if base.endswith(addition[:overlap]):
+            return base + addition[overlap:]
+
+    # 英数字の単語境界だけ空白を補う。日本語字幕の途中改行には空白を入れない。
+    separator = ' ' if re.search(r'[A-Za-z0-9]$', base) and re.match(r'[A-Za-z0-9]', addition) else ''
+    return base + separator + addition
+
+
+def _split_transcript_text(text, max_chars):
+    """長い単一cueを句読点優先で表示上限内へ分割する。"""
+    chunks = []
+    remaining = text
+    preferred_min = max(1, int(max_chars * 0.55))
+    while len(remaining) > max_chars:
+        window = remaining[:max_chars + 1]
+        cut = 0
+        for match in re.finditer(r'[。！？!?、，, ]', window):
+            if match.end() >= preferred_min:
+                cut = match.end()
+        if not cut:
+            cut = max_chars
+        chunks.append(remaining[:cut])
+        remaining = remaining[cut:]
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
+def build_transcript_blocks(vtt_entries, max_chars=84, max_gap=2.8):
+    """VTT cueを右側タイムライン向けの読みやすい発話ブロックへ整形する。
+
+    生のcueは短すぎたり時間が重なったりするため、そのままでは一覧性が悪い。
+    長い無音、十分な長さの文末、文字数上限を境界としてまとめる。
+    """
+    blocks = []
+    current = None
+    previous_text = None
+
+    def flush():
+        nonlocal current
+        if current and current["text"]:
+            blocks.append({
+                "start": round(current["start"], 3),
+                "end": round(max(current["end"], current["start"]), 3),
+                "text": current["text"],
+            })
+        current = None
+
+    for entry in vtt_entries:
+        if not entry or len(entry) < 3:
+            continue
+        try:
+            start = float(entry[0])
+            end = float(entry[1])
+        except (TypeError, ValueError):
+            continue
+        text = _clean_transcript_text(entry[2])
+        if not text or text == previous_text:
+            continue
+        previous_text = text
+
+        chunks = _split_transcript_text(text, max_chars)
+        text_length = max(1, len(text))
+        consumed = 0
+        duration = max(0.0, end - start)
+        for chunk in chunks:
+            chunk_start = start + duration * consumed / text_length
+            consumed += len(chunk)
+            chunk_end = start + duration * consumed / text_length
+
+            if current is None:
+                current = {"start": chunk_start, "end": chunk_end, "text": chunk}
+                continue
+
+            joined = _join_transcript_text(current["text"], chunk)
+            gap = chunk_start - current["end"]
+            sentence_complete = bool(re.search(r'[。！？!?]$', current["text"]))
+            should_flush = (
+                gap > max_gap
+                or len(joined) > max_chars
+                or (sentence_complete and len(current["text"]) >= 28)
+            )
+            if should_flush:
+                flush()
+                current = {"start": chunk_start, "end": chunk_end, "text": chunk}
+            else:
+                current["text"] = joined
+                current["end"] = max(current["end"], chunk_end)
+
+    flush()
+    return blocks
+
+
 def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_text=None, thumbnail_path=None, vtt_entries=None, title: str = "", description: str = None):
     """Markdown ライクなテキストを data.js + index.html に変換
 
     従来のモノリシックHTML生成の代わりに:
-    - data.js: 動画固有のデータ（セクション、画像パス、字幕テキスト等）
+    - data.js: 動画固有のデータ（セクション、画像パス、時刻付き字幕等）
     - index.html: 汎用テンプレート（template/index.htmlのコピー）
     を出力する。プロキシURL等の加工はテンプレート側で行う。
     """
@@ -949,12 +1060,9 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
     if thumbnail_path and os.path.exists(thumbnail_path):
         thumbnail_rel = os.path.relpath(thumbnail_path, output_dir).replace('\\', '/')
 
-    # ---------------------- 全タイムスタンプを収集 ---------------------- #
-    timestamps = [(idx, parse_timestamp(raw)) for idx, raw in enumerate(lines) if parse_timestamp(raw) is not None]
-
     # ---------------------- セクションバッファ ---------------------- #
     sections = []
-    current = {"heading": "", "heading_text": "", "level": 2, "body": [], "images": [], "timestamp": None, "subtitle": None}
+    current = {"heading": "", "heading_text": "", "level": 2, "body": [], "images": [], "timestamp": None}
 
     def flush():
         nonlocal current
@@ -966,20 +1074,14 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
             "body": "\n".join(current["body"]) if current["body"] else "",
             "images": current["images"],
             "timestamp": current["timestamp"],
-            "subtitle": current["subtitle"],
         })
-        current = {"heading": "", "heading_text": "", "level": 2, "body": [], "images": [], "timestamp": None, "subtitle": None}
+        current = {"heading": "", "heading_text": "", "level": 2, "body": [], "images": [], "timestamp": None}
 
     in_list = False
 
-    def add_timestamp_data(ts_sec, idx):
-        """タイムスタンプと関連字幕をcurrentに設定"""
-        next_sec = next((sec for i2, sec in timestamps if i2 > idx), None)
+    def add_timestamp_data(ts_sec):
+        """タイムスタンプをcurrentに設定する。字幕はページ全体で別管理する。"""
         current["timestamp"] = ts_sec
-        if vtt_entries:
-            subtitle_text = get_subtitle_for_range(vtt_entries, ts_sec, next_sec)
-            if subtitle_text:
-                current["subtitle"] = subtitle_text
 
     # ---------------------- メインループ ---------------------- #
     for idx, raw in enumerate(lines):
@@ -1007,14 +1109,14 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
             current["heading_text"] = heading_text
             current["level"] = level
             if ts_sec is not None:
-                add_timestamp_data(ts_sec, idx)
+                add_timestamp_data(ts_sec)
             continue
 
         # ----- タイムスタンプ単独行 ----- #
         ts_sec_inline = parse_timestamp(line)
         ts_only_line = bool(re.fullmatch(r"(?:動画[:：]?\s*)?(?:[0-9]+時間)?(?:[0-9]+分)?[0-9]+秒頃", line))
         if ts_only_line and ts_sec_inline is not None:
-            add_timestamp_data(ts_sec_inline, idx)
+            add_timestamp_data(ts_sec_inline)
             continue
 
         # ----- リスト項目内のタイムスタンプ付き項目を見出し化 ----- #
@@ -1035,7 +1137,7 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
 
             ts_sec = parse_timestamp(heading_text)
             if ts_sec is not None:
-                add_timestamp_data(ts_sec, idx)
+                add_timestamp_data(ts_sec)
 
             if body_text:
                 current["body"].append(f"<p>{inline_markdown_to_html(body_text)}</p>")
@@ -1095,7 +1197,7 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
             duration_sec = 0
 
     page_data = {
-        "schema_version": 1,
+        "schema_version": 2,
         "title": title,
         "video_id": video_id,
         "url": urlbase,
@@ -1104,6 +1206,7 @@ def txt_to_html(lines, output_html_path, urlbase: str = "", images=None, detail_
         "detail": markdown_to_html(detail_text) if detail_text else None,
         "description": description or None,
         "filmstrip": filmstrip,
+        "transcript": build_transcript_blocks(vtt_entries or []),
         "duration": duration_sec,
     }
 
