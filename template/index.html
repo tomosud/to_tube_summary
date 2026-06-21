@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="template-version" content="12">
+<meta name="template-version" content="13">
 <style>
 body{font-family:system-ui,"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;line-height:1.85;padding:1.2em;background:#121212;color:#e8e8e8;max-width:840px;margin:0 auto;box-sizing:border-box;font-size:17px;position:relative}
 h1{color:#ff9800;font-size:1.7em;border-bottom:1px solid #333;padding-bottom:.3em;margin-top:1.2em}
@@ -17,6 +17,7 @@ a{color:#4fc3f7;text-decoration:none}
 .timestamp-images{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:.8em}
 .thumb-container{position:relative;width:100%;aspect-ratio:16/9;transition:transform 0.2s;display:block;overflow:hidden}
 .thumb-container:hover{transform:scale(1.8);z-index:100}
+.thumb-container.is-playing,.thumb-container.is-playing:hover{transform:none;transition:none}
 .timestamp-images .thumb-container:nth-child(3n+1){transform-origin:left center}
 .timestamp-images .thumb-container:nth-child(3n+2){transform-origin:center center}
 .timestamp-images .thumb-container:nth-child(3n){transform-origin:right center}
@@ -40,8 +41,17 @@ html{overflow-x:hidden}
 .filmstrip-rail{position:absolute;top:0;left:-172px;width:148px;z-index:5}
 .filmstrip-frame{position:absolute;left:0;width:148px;height:83px;overflow:hidden;border-radius:4px;cursor:pointer;background:#000;box-shadow:0 1px 4px rgba(0,0,0,.5);transition:width .15s,height .15s}
 .filmstrip-frame:hover{width:444px;height:249px;z-index:30}
+.filmstrip-frame.is-playing,.filmstrip-frame.is-playing:hover{width:148px;height:83px;transition:none}
 .filmstrip-frame img{width:100%;height:100%;object-fit:cover;display:block}
 .filmstrip-frame::after{content:'▶';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,255,255,.5);font-size:13px;background:rgba(0,0,0,.4);padding:1px 6px;border-radius:50%;pointer-events:none}
+.thumb-container.is-playing::after,.filmstrip-frame.is-playing::after{content:'再生中';font-size:11px;padding:3px 7px}
+.global-video-player{position:fixed;z-index:180;display:none;background:#000;border-radius:6px;box-shadow:0 8px 28px rgba(0,0,0,.65)}
+.global-video-player.is-visible{display:block}
+.global-video-player.is-docked{box-shadow:0 10px 36px rgba(0,0,0,.8),0 0 0 1px #555}
+.global-video-viewport{position:absolute;inset:0;overflow:hidden;border-radius:6px;background:#000}
+.global-video-player iframe{position:absolute;top:0;left:0;border:0;border-radius:6px;transform-origin:top left}
+.global-video-close{position:absolute;z-index:3;top:-11px;right:-11px;width:28px;height:28px;border:1px solid #777;border-radius:50%;background:#202020;color:#fff;font-size:20px;line-height:24px;padding:0;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.7)}
+.global-video-close:hover{background:#444}
 .transcript-panel{position:fixed;z-index:200;top:12px;right:12px;bottom:12px;width:360px;display:flex;flex-direction:column;background:#181818;border:1px solid #353535;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.45);overflow:hidden;transform:translateX(calc(100% + 24px));transition:transform .2s ease}
 .transcript-panel.is-open{transform:translateX(0)}
 .transcript-header{height:48px;box-sizing:border-box;flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid #303030;background:#1d1d1d}
@@ -135,6 +145,149 @@ html{overflow-x:hidden}
 
   var videoId = data.video_id;
   var baseUrl = data.url || '';
+
+  // --- サムネイル動画：特殊URLを使う単一プレイヤー ---
+  // 通常のYouTube embedは使わず、従来どおり yout-ube.com のwatch URLを
+  // 拡大iframe内へ読み込む。最初のクリックはプレイヤーを開くだけで、
+  // 実際の再生ボタンはiframe内で利用者が押す。
+  var globalVideo = {
+    shell: null,
+    viewport: null,
+    iframe: null,
+    source: null,
+    profile: null,
+    scheduled: false
+  };
+
+  function ensureGlobalVideoPlayer() {
+    if (globalVideo.shell) return;
+    var shell = document.createElement('div');
+    shell.className = 'global-video-player';
+    shell.setAttribute('role', 'dialog');
+    shell.setAttribute('aria-label', '動画プレイヤー');
+
+    var viewport = document.createElement('div');
+    viewport.className = 'global-video-viewport';
+    var iframe = document.createElement('iframe');
+    iframe.title = '動画再生';
+    iframe.allowFullscreen = true;
+    viewport.appendChild(iframe);
+
+    var close = document.createElement('button');
+    close.className = 'global-video-close';
+    close.type = 'button';
+    close.setAttribute('aria-label', '動画を閉じる');
+    close.textContent = '×';
+    close.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      stopGlobalVideo();
+    });
+
+    shell.appendChild(viewport);
+    shell.appendChild(close);
+    document.body.appendChild(shell);
+    globalVideo.shell = shell;
+    globalVideo.viewport = viewport;
+    globalVideo.iframe = iframe;
+  }
+
+  function setIframeProfile(profile) {
+    if (profile.kind === 'filmstrip') {
+      globalVideo.iframe.style.width = '111.111%';
+      globalVideo.iframe.style.height = '111.111%';
+      globalVideo.iframe.style.transform = 'scale(0.9)';
+    } else {
+      globalVideo.iframe.style.width = '200%';
+      globalVideo.iframe.style.height = '200%';
+      globalVideo.iframe.style.transform = 'scale(0.5)';
+    }
+  }
+
+  function setPlayerBox(left, top, width, height, docked) {
+    var shell = globalVideo.shell;
+    shell.style.left = Math.round(left) + 'px';
+    shell.style.top = Math.round(top) + 'px';
+    shell.style.width = Math.round(width) + 'px';
+    shell.style.height = Math.round(height) + 'px';
+    shell.classList.toggle('is-docked', docked);
+  }
+
+  function updateGlobalVideoPosition() {
+    globalVideo.scheduled = false;
+    if (!globalVideo.source || !globalVideo.shell) return;
+    if (!document.documentElement.contains(globalVideo.source)) {
+      stopGlobalVideo();
+      return;
+    }
+
+    var rect = globalVideo.source.getBoundingClientRect();
+    var profile = globalVideo.profile;
+    var desired;
+    if (profile.kind === 'filmstrip') {
+      desired = { left: rect.left, top: rect.top, width: rect.width * 3, height: rect.height * 3 };
+    } else {
+      var scale = 1.8;
+      var width = rect.width * scale;
+      var height = rect.height * scale;
+      var extraWidth = width - rect.width;
+      var left = rect.left;
+      if (profile.origin === 'center') left -= extraWidth / 2;
+      if (profile.origin === 'right') left -= extraWidth;
+      desired = {
+        left: left,
+        top: rect.top - (height - rect.height) / 2,
+        width: width,
+        height: height
+      };
+    }
+
+    var sourceOutside = rect.bottom <= 0 || rect.top >= window.innerHeight || rect.right <= 0 || rect.left >= window.innerWidth;
+    var docked = sourceOutside || desired.top < 12;
+    if (docked) {
+      var rightSpace = window.innerWidth >= 1280 ? 400 : 16;
+      var availableWidth = Math.max(240, window.innerWidth - rightSpace - 16);
+      var dockWidth = Math.min(480, availableWidth);
+      var dockHeight = dockWidth * 9 / 16;
+      setPlayerBox(window.innerWidth - rightSpace - dockWidth, 12, dockWidth, dockHeight, true);
+    } else {
+      setPlayerBox(desired.left, desired.top, desired.width, desired.height, false);
+    }
+  }
+
+  function scheduleGlobalVideoPosition() {
+    if (!globalVideo.source || globalVideo.scheduled) return;
+    globalVideo.scheduled = true;
+    window.requestAnimationFrame(updateGlobalVideoPosition);
+  }
+
+  function startGlobalVideo(source, url, profile) {
+    ensureGlobalVideoPlayer();
+    if (globalVideo.source === source && globalVideo.iframe.src === url) return;
+    if (globalVideo.source) globalVideo.source.classList.remove('is-playing');
+    globalVideo.source = source;
+    globalVideo.profile = profile;
+    source.classList.add('is-playing');
+    setIframeProfile(profile);
+    globalVideo.shell.classList.add('is-visible');
+    updateGlobalVideoPosition();
+    // サイズ確定後に特殊watch URLを読み込む。autoplay指定は付けない。
+    globalVideo.iframe.src = url;
+  }
+
+  function stopGlobalVideo() {
+    if (globalVideo.source) globalVideo.source.classList.remove('is-playing');
+    globalVideo.source = null;
+    globalVideo.profile = null;
+    if (globalVideo.iframe) globalVideo.iframe.src = '';
+    if (globalVideo.shell) {
+      globalVideo.shell.classList.remove('is-visible');
+      globalVideo.shell.classList.remove('is-docked');
+    }
+  }
+
+  window.addEventListener('scroll', scheduleGlobalVideoPosition, { passive: true });
+  window.addEventListener('resize', scheduleGlobalVideoPosition);
 
   // --- タブタイトルをh1見出しから設定 ---
   if (!data.title) {
@@ -250,7 +403,7 @@ html{overflow-x:hidden}
       sectionDiv.appendChild(bodyDiv);
     }
 
-    // 画像グリッド（クリックでiframe埋め込み再生、ホバー外れるとサムネイル復帰）
+    // 画像グリッド（クリックで拡大プレイヤーを開く）
     if (sec.images && sec.images.length > 0) {
       var gridDiv = document.createElement('div');
       gridDiv.className = 'timestamp-images';
@@ -262,6 +415,7 @@ html{overflow-x:hidden}
         var container = document.createElement('div');
         container.className = 'thumb-container';
         container.setAttribute('data-url', clickUrl);
+        container.setAttribute('data-player-origin', j % 3 === 0 ? 'left' : (j % 3 === 1 ? 'center' : 'right'));
 
         var thumbImg = document.createElement('img');
         thumbImg.className = 'thumb-img';
@@ -271,38 +425,13 @@ html{overflow-x:hidden}
         container.appendChild(thumbImg);
         gridDiv.appendChild(container);
 
-        // クリックでiframe埋め込み、ホバー外れると復帰
-        (function(el, thumbEl) {
-          var iframe = null;
-          el.addEventListener('click', function(e) {
-            e.preventDefault();
-            if (iframe) return;
-            var url = this.getAttribute('data-url');
-            iframe = document.createElement('iframe');
-            iframe.src = url;
-            iframe.style.width = '200%';
-            iframe.style.height = '200%';
-            iframe.style.border = 'none';
-            iframe.style.borderRadius = '4px';
-            iframe.style.position = 'absolute';
-            iframe.style.top = '0';
-            iframe.style.left = '0';
-            iframe.style.transformOrigin = 'top left';
-            iframe.style.transform = 'scale(0.5)';
-            iframe.style.zIndex = '4';
-            iframe.allowFullscreen = true;
-            thumbEl.style.visibility = 'hidden';
-            this.appendChild(iframe);
+        container.addEventListener('click', function(e) {
+          e.preventDefault();
+          startGlobalVideo(this, this.getAttribute('data-url'), {
+            kind: 'grid',
+            origin: this.getAttribute('data-player-origin')
           });
-          el.addEventListener('mouseleave', function() {
-            if (iframe) {
-              iframe.src = '';
-              this.removeChild(iframe);
-              iframe = null;
-            }
-            thumbEl.style.visibility = 'visible';
-          });
-        })(container, thumbImg);
+        });
       }
       sectionDiv.appendChild(gridDiv);
     }
@@ -498,7 +627,10 @@ html{overflow-x:hidden}
   function buildFilmstrip() {
     var frames = data.filmstrip;
     var old = document.getElementById('filmstrip-rail');
-    if (old) old.parentNode.removeChild(old);
+    if (old) {
+      if (globalVideo.source && old.contains(globalVideo.source)) stopGlobalVideo();
+      old.parentNode.removeChild(old);
+    }
     if (!frames || !frames.length || !videoId) return;
     // 狭い画面（左マージンが取れない）では作らない
     if (window.innerWidth < 1180) return;
@@ -547,6 +679,7 @@ html{overflow-x:hidden}
       var frame = document.createElement('div');
       frame.className = 'filmstrip-frame';
       frame.style.top = (y - railTop) + 'px';
+      frame.setAttribute('data-url', makeVideoLink(baseUrl, Math.floor(f.start)));
       var im = document.createElement('img');
       im.src = f.src;
       im.loading = 'lazy';
@@ -554,36 +687,10 @@ html{overflow-x:hidden}
       im.onerror = function() { this.style.display = 'none'; };
       frame.appendChild(im);
 
-      (function(el, startSec) {
-        var iframe = null;
-        el.addEventListener('click', function() {
-          if (iframe) return;
-          iframe = document.createElement('iframe');
-          iframe.src = makeVideoLink(baseUrl, Math.floor(startSec));
-          iframe.style.position = 'absolute';
-          iframe.style.top = '0';
-          iframe.style.left = '0';
-          iframe.style.width = '111.111%';
-          iframe.style.height = '111.111%';
-          iframe.style.border = 'none';
-          iframe.style.borderRadius = '4px';
-          iframe.style.transformOrigin = 'top left';
-          iframe.style.transform = 'scale(0.9)';
-          iframe.style.zIndex = '4';
-          iframe.allowFullscreen = true;
-          el.appendChild(iframe);
-        });
-        el.addEventListener('mouseleave', function() {
-          setTimeout(function() {
-            if (!iframe) return;
-            var fullscreenEl = document.fullscreenElement || document.webkitFullscreenElement;
-            if (fullscreenEl === iframe || (fullscreenEl && el.contains(fullscreenEl))) return;
-            iframe.src = '';
-            el.removeChild(iframe);
-            iframe = null;
-          }, 150);
-        });
-      })(frame, f.start);
+      frame.addEventListener('click', function(e) {
+        e.preventDefault();
+        startGlobalVideo(this, this.getAttribute('data-url'), { kind: 'filmstrip' });
+      });
 
       rail.appendChild(frame);
     }
