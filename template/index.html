@@ -59,6 +59,7 @@ html{overflow-x:hidden}
 .global-video-caption-text{display:block;width:100%;box-sizing:border-box;padding:.3em .55em;border:1px solid #3a3a3a;border-radius:4px;background:rgba(12,12,12,.94);box-decoration-break:clone;-webkit-box-decoration-break:clone}
 .global-video-caption.is-hint{font-size:12px;color:#ddd}
 .global-video-caption.is-hint .global-video-caption-text{background:rgba(25,25,25,.86);border:1px solid rgba(255,255,255,.28)}
+.video-text-avoid{box-sizing:border-box}
 .transcript-panel{position:fixed;z-index:200;top:12px;right:12px;bottom:12px;width:360px;display:flex;flex-direction:column;background:#181818;border:1px solid #353535;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.45);overflow:hidden;transform:translateX(calc(100% + 24px));transition:transform .2s ease}
 .transcript-panel.is-open{transform:translateX(0)}
 .transcript-header{height:48px;box-sizing:border-box;flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid #303030;background:#1d1d1d}
@@ -177,6 +178,9 @@ html{overflow-x:hidden}
     scheduled: false
   };
   var PLAYER_DOCK_TOP = 20;
+  var TEXT_AVOID_MIN_WIDTH = 320;
+  var TEXT_AVOID_GAP = 18;
+  var textAvoidScheduled = false;
   var keepActiveTranscriptVisible = function() {};
 
   function ensureGlobalVideoPlayer() {
@@ -356,6 +360,62 @@ html{overflow-x:hidden}
     }
   }
 
+  function clearGlobalVideoTextAvoidance() {
+    var avoided = document.querySelectorAll('.video-text-avoid');
+    for (var i = 0; i < avoided.length; i++) {
+      avoided[i].classList.remove('video-text-avoid');
+      avoided[i].style.paddingRight = '';
+    }
+  }
+
+  function getGlobalVideoObstructionRect() {
+    if (!globalVideo.shell || !globalVideo.shell.classList.contains('is-visible') || !globalVideo.shell.classList.contains('is-docked')) return null;
+    var rect = globalVideo.shell.getBoundingClientRect();
+    var bottom = rect.bottom;
+    if (globalVideo.caption && globalVideo.caption.classList.contains('is-visible')) {
+      bottom = Math.max(bottom, globalVideo.caption.getBoundingClientRect().bottom);
+    }
+    return {
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: bottom
+    };
+  }
+
+  function updateGlobalVideoTextAvoidance() {
+    textAvoidScheduled = false;
+    var obstruction = getGlobalVideoObstructionRect();
+    if (!obstruction) {
+      clearGlobalVideoTextAvoidance();
+      return;
+    }
+
+    var targets = document.querySelectorAll('.timestamp-section p,.timestamp-section li,.timestamp-section h1,.timestamp-section h2,.timestamp-section h3,.timestamp-section h4,.detail-section p,.detail-section li,.detail-section h1,.detail-section h2,.detail-section h3,.detail-section h4');
+    var safeRight = obstruction.left - TEXT_AVOID_GAP;
+    for (var i = 0; i < targets.length; i++) {
+      var el = targets[i];
+      var rect = el.getBoundingClientRect();
+      var overlapsVertically = rect.bottom > obstruction.top - 4 && rect.top < obstruction.bottom + TEXT_AVOID_GAP;
+      var overlapsHorizontally = rect.right > obstruction.left && rect.left < obstruction.right;
+      var readableWidth = safeRight - rect.left;
+      if (overlapsVertically && overlapsHorizontally && readableWidth >= TEXT_AVOID_MIN_WIDTH) {
+        var paddingRight = Math.max(0, Math.ceil(rect.right - safeRight));
+        el.classList.add('video-text-avoid');
+        el.style.paddingRight = paddingRight + 'px';
+      } else {
+        el.classList.remove('video-text-avoid');
+        el.style.paddingRight = '';
+      }
+    }
+  }
+
+  function scheduleGlobalVideoTextAvoidance() {
+    if (textAvoidScheduled) return;
+    textAvoidScheduled = true;
+    window.requestAnimationFrame(updateGlobalVideoTextAvoidance);
+  }
+
   function setPlayerBox(left, top, width, height, docked) {
     var shell = globalVideo.shell;
     shell.style.left = Math.round(left) + 'px';
@@ -364,6 +424,7 @@ html{overflow-x:hidden}
     shell.style.height = Math.round(height) + 'px';
     shell.classList.toggle('is-docked', docked);
     keepActiveTranscriptVisible();
+    scheduleGlobalVideoTextAvoidance();
   }
 
   function dockGlobalVideoPlayer() {
@@ -472,6 +533,7 @@ html{overflow-x:hidden}
       globalVideo.shell.classList.remove('is-docked');
     }
     keepActiveTranscriptVisible();
+    clearGlobalVideoTextAvoidance();
   }
 
   window.addEventListener('scroll', scheduleGlobalVideoPosition, { passive: true });
