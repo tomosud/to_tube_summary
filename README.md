@@ -65,9 +65,9 @@ OpenAI API キーは初回実行時に入力を求められ、`api_key.txt` に�
 
 ### 画像要約モード
 
-`to_tube_summary_image.bat` は `--vision-mode balanced` で起動します。分割元画像と
+`to_tube_summary_image.bat` は `--vision-mode full` で起動します。分割元画像と
 重複フレームを除外し、動画全体の代表画像から映像タイムラインを作ったうえで、各章へ
-対応する最大6枚の画像を字幕と一緒に送ります。
+対応する最大10枚の画像を字幕と一緒に送ります。
 
 - `--vision-mode off`: 従来どおり字幕だけで要約
 - `--vision-mode balanced`: 低解像度の代表画像を利用（推奨）

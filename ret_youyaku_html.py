@@ -425,10 +425,11 @@ def create_visual_timeline(images, title, limit=36, detail="low"):
     content = [{
         "type": "text",
         "text": (
-            f"動画「{title}」の代表フレームです。各画像の直前に動画時刻があります。"
-            "画像から直接確認できる重要な実演、工程、比較、画面変化だけを、"
-            "「MM:SS 内容」の形式で時系列に1画像1行、簡潔な日本語で記述してください。"
-            "推測で字幕内容を補わず、同じ内容が続く場合はまとめてください。"
+            f"動画「{title}」から抜き出した一部の代表フレームです。各画像の直前に動画時刻があります。"
+            "これは字幕の欠落や曖昧さを補うための内部資料であり、動画全体を連続的に表すものではありません。"
+            "画像から確認できる重要な状態、工程、比較、画面変化だけを、"
+            "「MM:SS 内容」の形式で時系列に簡潔に記録してください。"
+            "画像間の因果関係や連続した動作を推測せず、同じ内容はまとめてください。"
         ),
     }]
     for path, start, _end in selected:
@@ -490,7 +491,7 @@ def stage1_get_outline(vtt_entries, title: str, video_duration_sec: int,
         if description else ""
     )
     vision_block = (
-        f"\n【代表画像から確認した映像タイムライン（参考情報）】\n{visual_timeline}\n"
+        f"\n【抜粋画像から得た補助情報（章境界の参考のみ）】\n{visual_timeline}\n"
         if visual_timeline else ""
     )
 
@@ -580,6 +581,8 @@ def stage2_summarize_section(section: _Section, section_text: str,
     system_prompt = (
         "あなたは動画字幕のセクション要約スペシャリストです。\n"
         "指定されたセクションの字幕を、内容を損なわず読みやすく要約します。\n"
+        "字幕を主資料とし、添付画像は字幕だけでは不明・曖昧な点を補う補助資料としてのみ使います。\n"
+        "画像は動画から抜き出した一部であり、連続した映像や全工程を表すものではありません。\n"
         "前のセクションで紹介された用語は再定義不要です。\n"
         "文体は常体（だ・ます調ではなく）で書いてください。\n"
         "ただし「〜である」を機械的に文末に付けないでください。\n"
@@ -623,8 +626,10 @@ def stage2_summarize_section(section: _Section, section_text: str,
         f"- 具体例や補足が複数ある場合は代表例だけ残してよいですが、主張の根拠が失われないようにしてください。\n"
         f"- 元のテキストの重要な論拠・専門用語を保持してください。\n"
         f"- 見出し行は不要です（呼び出し元が付けます）。\n"
-        f"- 添付画像がある場合は、その時刻と字幕を対応させ、画像から直接確認できる工程・状態・比較を補足してください。\n"
-        f"- 画像だけから断定できない内容は推測しないでください。\n"
+        f"- 添付画像は字幕の情報を補うためにだけ使ってください。字幕だけでは対象・状態・工程が不明な場合は、画像から妥当な範囲で推測して自然に本文へ統合してください。\n"
+        f"- 画像自体の説明を独立して書かず、「画像では」「フレームでは」「○分○秒の画像では」などのメタ記述や画像時刻を本文に出さないでください。\n"
+        f"- 抜粋画像の間を連続した出来事として結び付けたり、画像だけから仕組み・因果関係・発言内容を作ったりしないでください。\n"
+        f"- 字幕で十分に分かる内容は画像を根拠に言い直さず、同じ情報を繰り返さないでください。字幕と画像が食い違う場合は字幕を優先してください。\n"
         f"- Markdown形式で出力してください。\n\n"
         f"セクションの字幕テキスト:\n{section_text}"
     )
@@ -867,7 +872,7 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None,
     print(f'  [Stage 2] {len(outline.sections)}セクションを並列要約中...')
     summaries = stage2_summarize_all_parallel(
         vtt_entries, outline, title, description=description,
-        vision_images=vision_images, visual_timeline=visual_timeline,
+        vision_images=vision_images, visual_timeline=None,
         image_limit=image_limit, image_detail=image_detail,
     )
 
