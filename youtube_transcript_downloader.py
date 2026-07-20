@@ -502,6 +502,23 @@ def is_detail_mode():
     """詳細モードかどうかを判定"""
     return "--detail" in sys.argv
 
+def get_vision_mode():
+    """画像を要約に利用するモードを取得する。"""
+    if "--vision" in sys.argv:
+        return "balanced"
+    for i, arg in enumerate(sys.argv):
+        if arg == "--vision-mode" and i + 1 < len(sys.argv):
+            mode = sys.argv[i + 1].lower()
+            if mode in {"off", "balanced", "full"}:
+                return mode
+            raise ValueError(f"不正な --vision-mode: {mode}")
+        if arg.startswith("--vision-mode="):
+            mode = arg.split("=", 1)[1].lower()
+            if mode in {"off", "balanced", "full"}:
+                return mode
+            raise ValueError(f"不正な --vision-mode: {mode}")
+    return "off"
+
 def process_video(url):
     """動画処理のメインロジック"""
     video_id = get_video_id(url)
@@ -532,8 +549,11 @@ def process_video(url):
 
             # 詳細モードかどうかを確認
             detail_mode = is_detail_mode()
+            vision_mode = get_vision_mode()
             if detail_mode:
                 print("詳細モードで実行中...")
+            if vision_mode != "off":
+                print(f"画像要約モードで実行中: {vision_mode}")
 
             # description を並列処理の前に取得
             print("\n動画のdescriptionを取得中...")
@@ -562,7 +582,11 @@ def process_video(url):
             print("\nストーリーボード画像とサムネイルのダウンロードを開始（要約と並列実行）...")
             with ThreadPoolExecutor(max_workers=1) as executor:
                 images_future = executor.submit(dl_images, url, images_dir, output_dir)
-                html_path = create_summary(result, video_title, output_dir, video_url, images_future=images_future, detail_mode=detail_mode, description=description_filtered)
+                html_path = create_summary(
+                    result, video_title, output_dir, video_url,
+                    images_future=images_future, detail_mode=detail_mode,
+                    description=description_filtered, vision_mode=vision_mode,
+                )
             print(f"要約HTMLが作成されました: {html_path}")
             
             # VTTファイルを削除

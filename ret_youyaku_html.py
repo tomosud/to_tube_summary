@@ -7,10 +7,13 @@ import glob
 import hashlib
 import urllib.parse
 import math
+import base64
+import mimetypes
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
 from pydantic import BaseModel
 from typing import List
+from PIL import Image
 import tkinter as tk
 from tkinter import simpledialog
 
@@ -351,7 +354,106 @@ def _validate_outline(outline: _OutlineResult, video_duration_sec: int) -> bool:
     return True
 
 
-def stage1_get_outline(vtt_entries, title: str, video_duration_sec: int, description: str = None) -> _OutlineResult:
+def _average_hash(path):
+    """隣接フレームの保守的な近似重複判定用64bitハッシュ。"""
+    with Image.open(path) as image:
+        pixels = list(image.convert("L").resize((8, 8)).getdata())
+    average = sum(pixels) / len(pixels)
+    bits = sum((value >= average) << i for i, value in enumerate(pixels))
+    return bits, average
+
+
+def prepare_vision_images(images):
+    """分割元・完全一致・隣接するほぼ同一のフレームを除外する。"""
+    prepared = []
+    seen_content = set()
+    previous_hash = None
+    previous_time = None
+    previous_luma = None
+    for path, start, end in sorted(images or [], key=lambda item: (item[1], item[2], item[0])):
+        if "_original_" in os.path.basename(path).lower() or not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "rb") as image_file:
+                digest = hashlib.sha256(image_file.read()).digest()
+            if digest in seen_content:
+                continue
+            current_hash, current_luma = _average_hash(path)
+            if (previous_hash is not None and previous_time is not None
+                    and previous_luma is not None
+                    and start - previous_time <= 15
+                    and abs(previous_luma - current_luma) <= 1.5
+                    and (previous_hash ^ current_hash).bit_count() <= 2):
+                continue
+            seen_content.add(digest)
+            prepared.append((path, start, end))
+            previous_hash = current_hash
+            previous_time = start
+            previous_luma = current_luma
+        except Exception as e:
+            print(f"  [Vision] 重複判定をスキップ: {path} ({e})")
+    return prepared
+
+
+def _uniform_image_sample(images, limit):
+    if not images or limit <= 0:
+        return []
+    if len(images) <= limit:
+        return list(images)
+    indices = [round(i * (len(images) - 1) / (limit - 1)) for i in range(limit)]
+    return [images[i] for i in dict.fromkeys(indices)]
+
+
+def _image_content(path, detail="low"):
+    mime_type = mimetypes.guess_type(path)[0] or "image/jpeg"
+    with open(path, "rb") as image_file:
+        encoded = base64.b64encode(image_file.read()).decode("ascii")
+    return {
+        "type": "image_url",
+        "image_url": {
+            "url": f"data:{mime_type};base64,{encoded}",
+            "detail": detail,
+        },
+    }
+
+
+def create_visual_timeline(images, title, limit=36, detail="low"):
+    """全体の代表画像を解析して時刻付き映像タイムラインを作る。"""
+    selected = _uniform_image_sample(images, limit)
+    if not selected:
+        return None
+    content = [{
+        "type": "text",
+        "text": (
+            f"動画「{title}」の代表フレームです。各画像の直前に動画時刻があります。"
+            "画像から直接確認できる重要な実演、工程、比較、画面変化だけを、"
+            "「MM:SS 内容」の形式で時系列に1画像1行、簡潔な日本語で記述してください。"
+            "推測で字幕内容を補わず、同じ内容が続く場合はまとめてください。"
+        ),
+    }]
+    for path, start, _end in selected:
+        content.append({"type": "text", "text": f"動画時刻 {_seconds_to_label(start)}"})
+        content.append(_image_content(path, detail))
+    response = client.chat.completions.create(
+        model=MODEL_STAGE1,
+        messages=[{"role": "user", "content": content}],
+    )
+    count_tokens(response)
+    timeline = (response.choices[0].message.content or "").strip()
+    print(f"  [Vision] {len(selected)}枚から映像タイムラインを生成")
+    return timeline or None
+
+
+def _build_multimodal_user_content(prompt, images, detail):
+    content = [{"type": "text", "text": prompt}]
+    for path, start, _end in images or []:
+        content.append({"type": "text", "text": f"動画時刻 {_seconds_to_label(start)} のフレーム"})
+        content.append(_image_content(path, detail))
+    return content
+
+
+def stage1_get_outline(vtt_entries, title: str, video_duration_sec: int,
+                       description: str = None, visual_timeline: str = None) -> _OutlineResult:
     """Stage 1: VTT全体からセクションのアウトライン（見出し＋開始秒数）を取得する。
 
     LLMの long-context 特性（中盤の注意が薄れ、分割が前半に偏る）を避けるため、
@@ -387,6 +489,10 @@ def stage1_get_outline(vtt_entries, title: str, video_duration_sec: int, descrip
         f"\n【動画のDescription（参考情報）】\n{description}\n"
         if description else ""
     )
+    vision_block = (
+        f"\n【代表画像から確認した映像タイムライン（参考情報）】\n{visual_timeline}\n"
+        if visual_timeline else ""
+    )
 
     def segment_window(win_idx):
         lo, hi = bounds[win_idx], bounds[win_idx + 1]
@@ -398,7 +504,7 @@ def stage1_get_outline(vtt_entries, title: str, video_duration_sec: int, descrip
             f"以下は動画「{title}」字幕の一部（全{n_windows}区間中の第{win_idx+1}区間）です。\n"
             f"各行は「[ブロックID] (時刻) テキスト」の形式です。\n"
             f"この区間を話題の切れ目で {quota} 個のセクションに分割してください。\n"
-            f"{desc_block}\n"
+            f"{desc_block}{vision_block}\n"
             f"【ルール】\n"
             f"- セクションはちょうど {quota} 個にしてください。\n"
             f"- start_block_id には、その話題が始まる行の【ブロックID】を指定してください"
@@ -456,7 +562,9 @@ def stage1_get_outline(vtt_entries, title: str, video_duration_sec: int, descrip
 
 
 def stage2_summarize_section(section: _Section, section_text: str,
-                              outline: _OutlineResult, title: str, idx: int, description: str = None) -> _SectionSummary:
+                              outline: _OutlineResult, title: str, idx: int,
+                              description: str = None, section_images=None,
+                              visual_timeline: str = None, image_detail="low") -> _SectionSummary:
     """Stage 2: 1セクション分の字幕テキストを要約して _SectionSummary を返す"""
     n = len(outline.sections)
     outline_list = "\n".join(
@@ -482,11 +590,15 @@ def stage2_summarize_section(section: _Section, section_text: str,
         f"\n【動画のDescription（参考情報）】\n{description}\n"
         if description else ""
     )
+    vision_block = (
+        f"\n【動画全体の映像タイムライン（参考情報）】\n{visual_timeline}\n"
+        if visual_timeline else ""
+    )
     user_prompt = (
         f"動画「{title}」の要約を作成しています。\n"
         f"以下は動画全体のアウトライン（全{n}セクション）です：\n\n"
         f"{outline_list}\n"
-        f"{desc_block}\n"
+        f"{desc_block}{vision_block}\n"
         f"今回はセクション{idx+1}「{section.heading}」（{start_label}〜{end_label}）を要約してください。\n\n"
         f"【headingのルール】\n"
         f"- 「何についての話か」＋「その結論・評価」を20〜40字の一文で表してください。\n"
@@ -511,23 +623,43 @@ def stage2_summarize_section(section: _Section, section_text: str,
         f"- 具体例や補足が複数ある場合は代表例だけ残してよいですが、主張の根拠が失われないようにしてください。\n"
         f"- 元のテキストの重要な論拠・専門用語を保持してください。\n"
         f"- 見出し行は不要です（呼び出し元が付けます）。\n"
+        f"- 添付画像がある場合は、その時刻と字幕を対応させ、画像から直接確認できる工程・状態・比較を補足してください。\n"
+        f"- 画像だけから断定できない内容は推測しないでください。\n"
         f"- Markdown形式で出力してください。\n\n"
         f"セクションの字幕テキスト:\n{section_text}"
     )
 
-    response = client.beta.chat.completions.parse(
-        model=MODEL_STAGE2,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        response_format=_SectionSummary,
-    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": (
+            _build_multimodal_user_content(user_prompt, section_images, image_detail)
+            if section_images else user_prompt
+        )},
+    ]
+    try:
+        response = client.beta.chat.completions.parse(
+            model=MODEL_STAGE2, messages=messages, response_format=_SectionSummary,
+        )
+    except Exception as e:
+        if not section_images:
+            raise
+        print(f"  [Vision] セクション{idx+1}の画像入力に失敗、字幕のみで再試行: {e}")
+        response = client.beta.chat.completions.parse(
+            model=MODEL_STAGE2,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format=_SectionSummary,
+        )
     count_tokens(response)
     return response.choices[0].message.parsed
 
 
-def stage2_summarize_all_parallel(vtt_entries, outline: _OutlineResult, title: str, description: str = None) -> list:
+def stage2_summarize_all_parallel(vtt_entries, outline: _OutlineResult, title: str,
+                                  description: str = None, vision_images=None,
+                                  visual_timeline: str = None, image_limit=6,
+                                  image_detail="low") -> list:
     """Stage 2: 全セクションを ThreadPoolExecutor で並列要約する。
 
     戻り値: セクション順に並んだ要約文字列のリスト
@@ -540,7 +672,17 @@ def stage2_summarize_all_parallel(vtt_entries, outline: _OutlineResult, title: s
         sec = sections[idx]
         end_sec = sections[idx + 1].start_seconds if idx + 1 < n else float('inf')
         section_text = build_section_text(vtt_entries, sec.start_seconds, end_sec, timestamps=False)
-        summary = stage2_summarize_section(sec, section_text, outline, title, idx, description=description)
+        section_images = find_matching_images(
+            sec.start_seconds,
+            None if math.isinf(end_sec) else end_sec,
+            vision_images,
+            limit=image_limit,
+        ) if vision_images else None
+        summary = stage2_summarize_section(
+            sec, section_text, outline, title, idx, description=description,
+            section_images=section_images, visual_timeline=visual_timeline,
+            image_detail=image_detail,
+        )
         return idx, summary
 
     with ThreadPoolExecutor(max_workers=5) as executor:
@@ -673,7 +815,9 @@ def assemble_markdown(outline: _OutlineResult, summaries: list, title: str) -> s
     return "\n".join(lines)
 
 
-def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, thumbnail_path=None, images_future=None, description=None):
+def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None,
+                  thumbnail_path=None, images_future=None, description=None,
+                  vision_mode="off"):
     """字幕ファイルを要約してHTMLを生成する（3パス方式）
 
     images_future: concurrent.futures.Future を渡すと、HTML生成直前に
@@ -685,6 +829,26 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, t
     video_duration_sec = get_vtt_duration_in_seconds(result_merged_txt)
 
     print(f'要約中（Stage1: {MODEL_STAGE1} / Stage2: {MODEL_STAGE2}）')
+    visual_timeline = None
+    vision_images = None
+    image_limit = 0
+    image_detail = "low"
+
+    if vision_mode != "off":
+        print('  [Vision] ストーリーボードの完了を待機中...')
+        if images_future is not None:
+            images, thumbnail_path = images_future.result()
+        vision_images = prepare_vision_images(images)
+        print(f"  [Vision] 重複除去後 {len(vision_images)}枚（元 {len(images or [])}枚）")
+        global_limit = 72 if vision_mode == "full" else 36
+        image_limit = 10 if vision_mode == "full" else 6
+        image_detail = "high" if vision_mode == "full" else "low"
+        try:
+            visual_timeline = create_visual_timeline(
+                vision_images, title, limit=global_limit, detail=image_detail
+            )
+        except Exception as e:
+            print(f"  [Vision] 映像タイムライン生成に失敗、字幕中心で続行: {e}")
 
     # ── タイトル和訳（英語タイトルに日本語訳を付加）────────────────────────
     print('  [Title] 和訳確認中...')
@@ -694,11 +858,18 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None, t
 
     # ── Stage 1: アウトライン取得（AIプロンプトには原題を使用）────────────
     print('  [Stage 1] アウトライン生成中...')
-    outline = stage1_get_outline(vtt_entries, title, video_duration_sec, description=description)
+    outline = stage1_get_outline(
+        vtt_entries, title, video_duration_sec, description=description,
+        visual_timeline=visual_timeline,
+    )
 
     # ── Stage 2: セクション並列要約 ────────────────────────────────────────
     print(f'  [Stage 2] {len(outline.sections)}セクションを並列要約中...')
-    summaries = stage2_summarize_all_parallel(vtt_entries, outline, title, description=description)
+    summaries = stage2_summarize_all_parallel(
+        vtt_entries, outline, title, description=description,
+        vision_images=vision_images, visual_timeline=visual_timeline,
+        image_limit=image_limit, image_detail=image_detail,
+    )
 
     # ── Stage 3: 全体整合（見出しの統一・分割しすぎの統合）──────────────────
     print('  [Stage 3] 全体整合中...')
@@ -1464,7 +1635,8 @@ def filter_description(description: str, title: str) -> str:
         print(f"⚠️ description フィルタエラー: {str(e)}")
         return None
 
-def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=False, thumbnail_path=None, images_future=None, description=None):
+def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=False,
+       thumbnail_path=None, images_future=None, description=None, vision_mode="off"):
     """
     VTTファイルを要約してHTMLを生成する
 
@@ -1500,7 +1672,10 @@ def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=Fal
         vtt_content = read_vtt(vtt)
         detail_text = generate_detail_text(vtt_content, title)
     
-    yoyaku_gemini(vtt, title, html_path, images, detail_text, thumbnail_path, images_future=images_future, description=description)
+    yoyaku_gemini(
+        vtt, title, html_path, images, detail_text, thumbnail_path,
+        images_future=images_future, description=description, vision_mode=vision_mode,
+    )
 
     # トークン使用量サマリーを表示
     print_token_summary()

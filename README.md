@@ -40,6 +40,7 @@ OpenAI API キーは初回実行時に入力を求められ、`api_key.txt` に�
 | ファイル | 用途 |
 | --- | --- |
 | `to_tube_summary.bat` | 通常の要約を作る |
+| `to_tube_summary_image.bat` | 字幕と代表画像を使った要約を作る |
 | `to_tube_summary_cheep.bat` | コストを抑えて要約を作る |
 
 ### 使用モデル
@@ -57,9 +58,20 @@ OpenAI API キーは初回実行時に入力を求められ、`api_key.txt` に�
 | ファイル | Stage 1 | Stage 2 |
 | --- | --- | --- |
 | `to_tube_summary.bat` | `gpt-5.4-mini-2026-03-17` | `gpt-5.4-mini-2026-03-17` |
+| `to_tube_summary_image.bat` | `gpt-5.4-mini-2026-03-17` | `gpt-5.4-mini-2026-03-17` |
 | `to_tube_summary_cheep.bat` | `gpt-5.4-mini-2026-03-17` | `gpt-5.4-nano-2026-03-17` |
 
 モデルを変えたい場合は、bat ファイルの `OPENAI_MODEL_STAGE1` / `OPENAI_MODEL_STAGE2` の行を直接書き換えます。
+
+### 画像要約モード
+
+`to_tube_summary_image.bat` は `--vision-mode balanced` で起動します。分割元画像と
+重複フレームを除外し、動画全体の代表画像から映像タイムラインを作ったうえで、各章へ
+対応する最大6枚の画像を字幕と一緒に送ります。
+
+- `--vision-mode off`: 従来どおり字幕だけで要約
+- `--vision-mode balanced`: 低解像度の代表画像を利用（推奨）
+- `--vision-mode full`: 画像数と解像度を増やして利用
 
 ### 章の切り分けの仕組み
 
