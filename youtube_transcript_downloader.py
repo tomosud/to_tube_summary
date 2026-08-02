@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 #import subprocess
 from youtube_transcript_api import YouTubeTranscriptApi
 from ret_youyaku_html import do as create_summary, filter_description
+from subtitle_language import detect_video_language, language_family, ordered_transcripts
 
 import yt_dlp
 from PIL import Image
@@ -318,6 +319,25 @@ def fetch_video_description(url):
         print(f"⚠️ description取得エラー: {str(e)}")
         return None
 
+def fetch_video_identity(url):
+    """字幕言語判定に使うタイトルと音声言語をyt-dlpから取得する。"""
+    try:
+        with yt_dlp.YoutubeDL({'skip_download': True, 'quiet': True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+
+        language = info.get('language') or info.get('audio_language')
+        if not language:
+            # 動画全体のlanguageがない場合は、選択された音声形式の言語を使う。
+            for fmt in info.get('requested_formats') or []:
+                if fmt.get('acodec') != 'none' and fmt.get('language'):
+                    language = fmt['language']
+                    break
+
+        return info.get('title') or None, language
+    except Exception as e:
+        print(f"⚠️ 動画言語メタデータ取得エラー: {str(e)}")
+        return None, None
+
 def get_youtube_title(video_id):
     """YouTubeの動画タイトルをWebページから取得"""
     try:
@@ -337,16 +357,16 @@ def get_youtube_title(video_id):
         print(f"タイトル取得エラー: {str(e)}")
     return None
 
-def download_transcript(video_id, output_dir):
+def download_transcript(video_id, output_dir, video_title=None, metadata_language=None):
     try:
         # 出力ディレクトリ作成
         os.makedirs(output_dir, exist_ok=True)
         
         # 動画のタイトルをWebページから取得
         print("動画タイトルを取得中...")
-        video_title = get_youtube_title(video_id)
+        video_title = video_title or get_youtube_title(video_id)
+        original_title = video_title
         if video_title:
-            original_title = video_title
             video_title = sanitize_filename(video_title)
             print(f"動画タイトル: {original_title}")
             print(f"ファイル名: {video_title}")
@@ -368,7 +388,7 @@ def download_transcript(video_id, output_dir):
                 print("YouTubeへのリクエストが失敗しました。ネットワーク接続を確認してください。")
             return None
         
-        # 字幕の優先順位: 日本語 > 英語 > その他
+        # 原言語を判定し、その言語の字幕だけを使う。
         transcript = None
         transcript_language = None
         
@@ -379,53 +399,33 @@ def download_transcript(video_id, output_dir):
             print(f"- {t.language} ({t.language_code})")
             available_transcripts.append(t)
             
-        # 優先順位をつけて字幕を取得
-        # 1. 日本語の通常字幕
-        try:
-            transcript = transcript_list.find_transcript(['ja']).fetch()
-            transcript_language = '日本語'
-            print("日本語字幕が見つかりました")
-        except Exception as e:
-            print("日本語字幕が見つかりませんでした")
-            
-            # 2. 日本語の自動生成字幕を探す
-            auto_ja_found = False
-            for t in available_transcripts:
-                if (t.language_code == 'ja' and 'auto' in str(t.language).lower()) or t.language == 'Japanese (auto-generated)':
-                    try:
-                        transcript = t.fetch()
-                        transcript_language = '日本語(自動生成)'
-                        print("日本語(自動生成)字幕が見つかりました")
-                        auto_ja_found = True
-                        break
-                    except Exception as e:
-                        print(f"日本語自動生成字幕の取得に失敗: {str(e)}")
-            
-            # 3. 英語字幕
-            if not auto_ja_found:
-                print("英語字幕を試します...")
-                try:
-                    transcript = transcript_list.find_transcript(['en']).fetch()
-                    transcript_language = '英語'
-                    print("英語字幕が見つかりました")
-                except Exception as e1:
-                    try:
-                        transcript = transcript_list.find_transcript(['en-US']).fetch()
-                        transcript_language = '英語(US)'
-                        print("英語(US)字幕が見つかりました")
-                    except Exception as e2:
-                        print("英語字幕が見つかりませんでした")
-                        
-                        # 4. 最初に見つかる字幕を使用
-                        if available_transcripts:
-                            try:
-                                first_transcript = available_transcripts[0]
-                                transcript = first_transcript.fetch()
-                                transcript_language = f"{first_transcript.language} ({first_transcript.language_code})"
-                                print(f"{transcript_language}字幕を使用します")
-                            except Exception as e3:
-                                print(f"字幕の取得に失敗: {str(e3)}")
-                                return None
+        target_language, detection_reason = detect_video_language(
+            original_title,
+            metadata_language,
+            available_transcripts,
+        )
+        target_label = '日本語' if target_language == 'ja' else '英語'
+        print(f"\n動画の言語判定: {target_label}（{detection_reason}）")
+
+        candidates = ordered_transcripts(available_transcripts, target_language)
+        if not candidates:
+            print("この動画には字幕が見つかりませんでした。")
+            return None
+
+        for candidate in candidates:
+            candidate_family = language_family(getattr(candidate, 'language_code', None))
+            if candidate_family != target_language:
+                print(f"{target_label}字幕が見つからないため、{candidate.language} ({candidate.language_code}) の字幕を使用します。")
+            generated_label = '・自動生成' if getattr(candidate, 'is_generated', False) else ''
+            transcript_language = (
+                f"{candidate.language} ({candidate.language_code}{generated_label})"
+            )
+            try:
+                transcript = candidate.fetch()
+                print(f"使用する字幕: {transcript_language}")
+                break
+            except Exception as e:
+                print(f"{transcript_language}字幕の取得に失敗: {str(e)}")
         
         # 字幕が取得できたか確認
         if not transcript:
@@ -527,8 +527,11 @@ def process_video(url):
         print("有効なYouTube URLではありません")
         return False
     
-    # タイトルを取得してディレクトリを作成
-    video_title = get_youtube_title(video_id)
+    # タイトルと音声言語を取得してディレクトリを作成
+    video_title, metadata_language = fetch_video_identity(url)
+    if metadata_language:
+        print(f"動画メタデータの言語: {metadata_language}")
+    video_title = video_title or get_youtube_title(video_id)
     if not video_title:
         video_title = video_id
     safe_title = sanitize_filename(video_title)
@@ -537,7 +540,11 @@ def process_video(url):
     output_dir, images_dir = create_output_dirs(safe_title)
     
     # 字幕を処理
-    result = download_transcript(video_id, output_dir)
+    result = download_transcript(
+        video_id, output_dir,
+        video_title=video_title,
+        metadata_language=metadata_language,
+    )
     
     if result:
         print(f"字幕が保存されました: {result}")

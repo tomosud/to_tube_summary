@@ -10,7 +10,8 @@
       "Bash(ls c:/work/script/to_tube_summary/*.py)",
       "mcp__plugin_claude-mem_mcp-search__smart_outline",
       "PowerShell(& \"C:\\\\work\\\\script\\\\to_tube_summary\\\\.venv\\\\Scripts\\\\python.exe\" -m py_compile \"C:\\\\work\\\\script\\\\to_tube_summary\\\\ret_youyaku_html.py\")",
-      "PowerShell(if \\($?\\) { \"OK: syntax valid\" })"
+      "PowerShell(if \\($?\\) { \"OK: syntax valid\" })",
+      "Bash(awk 'NR>=380 && NR<=440' \"C:\\\\work\\\\script\\\\to_tube_summary\\\\youtube_transcript_downloader.py\")"
     ],
     "deny": [],
     "ask": []
