@@ -58,8 +58,8 @@ OpenAI API キーは初回実行時に入力を求められ、`api_key.txt` に�
 
 | ファイル | Stage 1 | Stage 2 |
 | --- | --- | --- |
-| `to_tube_summary.bat` | `gpt-5.4-mini-2026-03-17` | `gpt-5.4-mini-2026-03-17` |
-| `to_tube_summary_image.bat` | `gpt-5.4-mini-2026-03-17` | `gpt-5.4-mini-2026-03-17` |
+| `to_tube_summary.bat` | `gpt-5.6-luna` | `gpt-5.6-luna` |
+| `to_tube_summary_image.bat` | `gpt-5.6-luna` | `gpt-5.6-luna` |
 | `to_tube_summary_cheep.bat` | `gpt-5.4-mini-2026-03-17` | `gpt-5.4-nano-2026-03-17` |
 
 モデルを変えたい場合は、bat ファイルの `OPENAI_MODEL_STAGE1` / `OPENAI_MODEL_STAGE2` の行を直接書き換えます。
