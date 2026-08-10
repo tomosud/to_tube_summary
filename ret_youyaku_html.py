@@ -10,12 +10,14 @@ import math
 import base64
 import mimetypes
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 from openai import OpenAI
 from pydantic import BaseModel
 from typing import List
 from PIL import Image
 import tkinter as tk
 from tkinter import simpledialog
+from openai_model_config import calculate_usage_cost, resolve_models
 
 
 # ── Structured Outputs 用 Pydantic モデル ──────────────────────────────────
@@ -90,42 +92,81 @@ print('---apikey set!')
 # OpenAIクライアントを初期化
 client = OpenAI(api_key=apikey)
 
-# 使用するモデル（環境変数から取得、デフォルトはgpt-5.2）
-MODEL_NAME = os.environ.get('OPENAI_MODEL', 'gpt-5.2-2025-12-11')
-# Stage 1（分散指示）/ Stage 2（heading指示）で別モデルを使用可能
-MODEL_STAGE1 = os.environ.get('OPENAI_MODEL_STAGE1', MODEL_NAME)
-MODEL_STAGE2 = os.environ.get('OPENAI_MODEL_STAGE2', MODEL_NAME)
+# 使用するモデル。補助処理は OPENAI_MODEL 未指定時に Stage 1 へ追従する。
+MODEL_NAME, MODEL_STAGE1, MODEL_STAGE2 = resolve_models(os.environ)
 
-# トークン使用量の累計
-total_usage = {'input': 0, 'output': 0}
+# トークン使用量の累計（並列実行されるためロックで保護）
+total_usage = {'input': 0, 'cached_input': 0, 'output': 0, 'by_model': {}}
+_usage_lock = Lock()
 
-def count_tokens(response):
-    """APIレスポンスからトークン数を取得して累計に加算"""
+def count_tokens(response, model=None):
+    """APIレスポンスからモデル別トークン数を取得して累計に加算する。"""
     usage = response.usage
     input_tokens = usage.prompt_tokens
     output_tokens = usage.completion_tokens
+    prompt_details = getattr(usage, 'prompt_tokens_details', None)
+    cached_input_tokens = getattr(prompt_details, 'cached_tokens', 0) or 0
+    model = model or getattr(response, 'model', None) or 'unknown'
 
-    # 累計に加算
-    total_usage['input'] += input_tokens
-    total_usage['output'] += output_tokens
+    with _usage_lock:
+        total_usage['input'] += input_tokens
+        total_usage['cached_input'] += cached_input_tokens
+        total_usage['output'] += output_tokens
+        model_usage = total_usage['by_model'].setdefault(
+            model, {'input': 0, 'cached_input': 0, 'output': 0}
+        )
+        model_usage['input'] += input_tokens
+        model_usage['cached_input'] += cached_input_tokens
+        model_usage['output'] += output_tokens
 
     return input_tokens, output_tokens
 
 def print_token_summary():
-    """トークン使用量の累計を表示"""
-    input_tok = total_usage['input']
-    output_tok = total_usage['output']
-
-    # 通常モデル（入力$1.75/1M、出力$14.00/1M）
-    normal_cost = (input_tok / 1_000_000) * 1.75 + (output_tok / 1_000_000) * 14.00
-    # 安価モデル（入力$0.25/1M、出力$2.00/1M）
-    cheap_cost = (input_tok / 1_000_000) * 0.25 + (output_tok / 1_000_000) * 2.00
+    """モデル別のトークン使用量とStandard料金の概算を表示する。"""
+    with _usage_lock:
+        input_tok = total_usage['input']
+        cached_input_tok = total_usage['cached_input']
+        output_tok = total_usage['output']
+        usage_by_model = {
+            model: usage.copy() for model, usage in total_usage['by_model'].items()
+        }
 
     print(f"\n=== API使用量サマリー ===")
     print(f"入力トークン: {input_tok:,}")
+    if cached_input_tok:
+        print(f"  うちキャッシュ入力: {cached_input_tok:,}")
     print(f"出力トークン: {output_tok:,}")
     print(f"合計トークン: {input_tok + output_tok:,}")
-    print(f"価格目安: 通常モデル ${normal_cost:.4f} / 安価モデル ${cheap_cost:.4f}")
+
+    total_cost = 0.0
+    has_unknown_price = False
+    print("モデル別:")
+    for model, usage in sorted(usage_by_model.items()):
+        cost = calculate_usage_cost(
+            model,
+            usage['input'],
+            usage['output'],
+            usage['cached_input'],
+        )
+        cached_note = (
+            f"（キャッシュ {usage['cached_input']:,}）"
+            if usage['cached_input'] else ""
+        )
+        if cost is None:
+            has_unknown_price = True
+            cost_text = "料金表未登録"
+        else:
+            total_cost += cost
+            cost_text = f"${cost:.4f}"
+        print(
+            f"  {model}: 入力 {usage['input']:,}{cached_note} / "
+            f"出力 {usage['output']:,} / {cost_text}"
+        )
+
+    if has_unknown_price:
+        print(f"価格目安（登録済みモデル分のみ）: ${total_cost:.4f}")
+    else:
+        print(f"価格目安（Standard）: ${total_cost:.4f}")
 
 # グローバル変数
 url_base = ""
@@ -439,7 +480,7 @@ def create_visual_timeline(images, title, limit=36, detail="low"):
         model=MODEL_STAGE1,
         messages=[{"role": "user", "content": content}],
     )
-    count_tokens(response)
+    count_tokens(response, MODEL_STAGE1)
     timeline = (response.choices[0].message.content or "").strip()
     print(f"  [Vision] {len(selected)}枚から映像タイムラインを生成")
     return timeline or None
@@ -523,7 +564,7 @@ def stage1_get_outline(vtt_entries, title: str, video_duration_sec: int,
             ],
             response_format=_WindowOutline,
         )
-        count_tokens(response)
+        count_tokens(response, MODEL_STAGE1)
         return win_idx, lo, hi, response.choices[0].message.parsed
 
     results = [None] * n_windows
@@ -657,7 +698,7 @@ def stage2_summarize_section(section: _Section, section_text: str,
             ],
             response_format=_SectionSummary,
         )
-    count_tokens(response)
+    count_tokens(response, MODEL_STAGE2)
     return response.choices[0].message.parsed
 
 
@@ -767,7 +808,7 @@ def stage3_polish(outline: _OutlineResult, summaries: list, title: str):
             ],
             response_format=_PolishResult,
         )
-        count_tokens(response)
+        count_tokens(response, MODEL_STAGE1)
         polished = response.choices[0].message.parsed.sections
     except Exception as e:
         print(f"  [Stage 3] 整合に失敗（元の見出しを使用）: {e}")
@@ -899,7 +940,7 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None,
         messages=highlights_messages
     )
 
-    in_tok, out_tok = count_tokens(responseB)
+    in_tok, out_tok = count_tokens(responseB, MODEL_NAME)
     print(f"  ポイント: 入力 {in_tok:,} / 出力 {out_tok:,} トークン")
 
     responseB_text = responseB.choices[0].message.content
@@ -1571,7 +1612,7 @@ def generate_detail_text(vtt_content, title):
             messages=[{"role": "user", "content": format_prompt}]
         )
         # トークン数を記録
-        in_tok, out_tok = count_tokens(response)
+        in_tok, out_tok = count_tokens(response, MODEL_NAME)
         print(f"  詳細テキスト: 入力 {in_tok:,} / 出力 {out_tok:,} トークン")
         return response.choices[0].message.content
     except Exception as e:
@@ -1595,7 +1636,7 @@ def make_display_title(title: str) -> str:
             model=MODEL_NAME,
             messages=[{"role": "user", "content": prompt}]
         )
-        count_tokens(response)
+        count_tokens(response, MODEL_NAME)
         ja = response.choices[0].message.content.strip()
         if ja:
             return f"{title}　{ja}"
@@ -1633,7 +1674,7 @@ def filter_description(description: str, title: str) -> str:
             model=MODEL_NAME,
             messages=[{"role": "user", "content": prompt}]
         )
-        count_tokens(response)
+        count_tokens(response, MODEL_NAME)
         result = response.choices[0].message.content.strip()
         return result or None
     except Exception as e:

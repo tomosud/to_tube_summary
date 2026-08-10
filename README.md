@@ -52,6 +52,7 @@ OpenAI API キーは初回実行時に入力を求められ、`api_key.txt` に�
 | Stage 1 | 章の切り分け（字幕を時間で等分した窓ごとに並列で境界を検出） | `OPENAI_MODEL_STAGE1` |
 | Stage 2 | 章ごとの本文要約（並列） | `OPENAI_MODEL_STAGE2` |
 | Stage 3 | 全体整合（見出しの統一・分割しすぎた章の統合） | `OPENAI_MODEL_STAGE1` と同じ |
+| 補助処理 | Description整理・タイトル翻訳・ハイライト生成 | `OPENAI_MODEL`。未指定時は `OPENAI_MODEL_STAGE1` と同じ |
 
 各 bat ファイルでのモデル設定は次の通りです。
 
@@ -62,6 +63,7 @@ OpenAI API キーは初回実行時に入力を求められ、`api_key.txt` に�
 | `to_tube_summary_cheep.bat` | `gpt-5.4-mini-2026-03-17` | `gpt-5.4-nano-2026-03-17` |
 
 モデルを変えたい場合は、bat ファイルの `OPENAI_MODEL_STAGE1` / `OPENAI_MODEL_STAGE2` の行を直接書き換えます。
+処理終了時の料金目安は、実際に使ったモデルとキャッシュ入力を分け、Standard料金でモデル別に計算されます。
 
 ### 画像要約モード
 
