@@ -305,7 +305,7 @@ def get_video_id(url):
 '''
 def get_video_id(url):
     """URLから動画IDを抽出"""
-    pattern = r'(?:v=|\/)([0-9A-Za-z_-]{11}).*'
+    pattern = r'(?:v=|/)([0-9A-Za-z_-]{11}).*'
     match = re.search(pattern, url)
     return match.group(1) if match else None
 '''

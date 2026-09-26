@@ -9,6 +9,7 @@ import urllib.parse
 import math
 import base64
 import mimetypes
+import getpass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from openai import OpenAI
@@ -56,23 +57,39 @@ TEMPLATE_HTML = os.path.join(TEMPLATE_DIR, 'index.html')
 def get_api_key():
     """APIキーを取得または設定する（DPAPI暗号化）"""
     import win32crypt
-    api_key_file = "localsettings.bin"
+    api_key_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "localsettings.bin")
 
     # 暗号化ファイルが存在する場合は復号して返す
     if os.path.exists(api_key_file):
-        with open(api_key_file, "rb") as f:
-            encrypted = f.read()
-        _, decrypted = win32crypt.CryptUnprotectData(encrypted, None, None, None, 0)
-        return decrypted.decode("utf-8").strip()
+        try:
+            with open(api_key_file, "rb") as f:
+                encrypted = f.read()
+            _, decrypted = win32crypt.CryptUnprotectData(encrypted, None, None, None, 0)
+            return decrypted.decode("utf-8").strip()
+        except Exception as exc:
+            # DPAPI data can become unreadable after moving it from another PC or
+            # Windows account. Keep a backup and ask for the key again below.
+            backup_file = api_key_file + ".unreadable"
+            try:
+                os.replace(api_key_file, backup_file)
+            except OSError:
+                pass
+            print(f"Saved API key could not be decrypted ({exc}). Please enter it again.")
 
     # ファイルが存在しない場合はダイアログを表示して入力を求める
-    root = tk.Tk()
-    root.withdraw()  # メインウィンドウを非表示
-
-    api_key = simpledialog.askstring(
-        "API Key 設定",
-        "OpenAI APIキーを入力してください：\n（入力されたキーはapi_key.binに暗号化して保存されます）"
-    )
+    root = None
+    try:
+        root = tk.Tk()
+        root.withdraw()  # メインウィンドウを非表示
+        api_key = simpledialog.askstring(
+            "API Key 設定",
+            "OpenAI APIキーを入力してください：\n（入力されたキーは暗号化して保存されます）"
+        )
+    except tk.TclError:
+        api_key = getpass.getpass("OpenAI API key: ")
+    finally:
+        if root is not None:
+            root.destroy()
 
     if api_key:
         # APIキーをWindowsユーザーに紐付けて暗号化して保存
