@@ -179,5 +179,19 @@ class ContactSheetTest(unittest.TestCase):
         self.assertEqual(Image.open(io.BytesIO(data)).size[0], 2 * 240)
 
 
+class StrictSchemaTest(unittest.TestCase):
+    def test_section_summary_schema_is_strict(self):
+        schema = summary_module._strict_schema(summary_module._SectionSummary)
+        self.assertIs(schema["additionalProperties"], False)
+        self.assertEqual(set(schema["required"]), {"heading", "summary"})
+        self.assertEqual(set(schema["properties"]), {"heading", "summary"})
+
+    def test_nested_objects_are_strict(self):
+        schema = summary_module._strict_schema(summary_module._OutlineResult)
+        for definition in schema.get("$defs", {}).values():
+            self.assertIs(definition["additionalProperties"], False)
+            self.assertEqual(set(definition["required"]), set(definition["properties"]))
+
+
 if __name__ == "__main__":
     unittest.main()

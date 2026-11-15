@@ -182,9 +182,8 @@ MODEL_LIGHT = resolve_light_model(os.environ)
 total_usage = {'input': 0, 'cached_input': 0, 'output': 0, 'by_model': {}}
 _usage_lock = Lock()
 
-def count_tokens(response, model=None):
-    """APIレスポンスからモデル別トークン数を取得して累計に加算する。"""
-    usage = response.usage
+def _add_usage(usage, model):
+    """usage オブジェクトを直接受け取りモデル別トークン数を累計に加算する。"""
     cached_input_tokens = getattr(usage, 'cache_read_input_tokens', 0) or 0
     # cache_creation はキャッシュ書き込み分。コスト計算上は非キャッシュ入力として扱う
     # （cached_input には含めず、input 合計にだけ加算する）。
@@ -192,7 +191,7 @@ def count_tokens(response, model=None):
     # Anthropic の usage.input_tokens は非キャッシュ分のみなので合計入力へ直す。
     input_tokens = usage.input_tokens + cached_input_tokens + cache_creation_tokens
     output_tokens = usage.output_tokens
-    model = model or getattr(response, 'model', None) or 'unknown'
+    model = model or 'unknown'
 
     with _usage_lock:
         total_usage['input'] += input_tokens
@@ -206,6 +205,11 @@ def count_tokens(response, model=None):
         model_usage['output'] += output_tokens
 
     return input_tokens, output_tokens
+
+def count_tokens(response, model=None):
+    """APIレスポンスからモデル別トークン数を取得して累計に加算する。"""
+    model = model or getattr(response, 'model', None) or 'unknown'
+    return _add_usage(response.usage, model)
 
 def print_token_summary():
     """モデル別のトークン使用量とStandard料金の概算を表示する。"""
@@ -1253,11 +1257,16 @@ def stage1_get_outline(vtt_entries, title: str, video_duration_sec: int,
     return outline
 
 
-def stage2_summarize_section(section: _Section, section_text: str,
-                              outline: _OutlineResult, title: str, idx: int,
-                              description: str = None, section_images=None,
-                              visual_timeline: str = None, image_detail="low") -> _SectionSummary:
-    """Stage 2: 1セクション分の字幕テキストを要約して _SectionSummary を返す"""
+def _build_stage2_request(section: _Section, section_text: str,
+                          outline: _OutlineResult, title: str, idx: int,
+                          description: str = None, section_images=None,
+                          visual_timeline: str = None, image_detail="low"):
+    """Stage 2 の1セクション分のリクエスト内容を組み立てる。
+
+    戻り値: (system_blocks, messages, text_only_messages)
+    system_blocks の shared_context はセクションに依存せず、全セクションで
+    バイト単位に同一（プロンプトキャッシュ対象）。
+    """
     n = len(outline.sections)
     outline_list = "\n".join(
         f"{i+1}. {s.heading}（{_seconds_to_label(s.start_seconds)}〜）"
@@ -1290,19 +1299,28 @@ def stage2_summarize_section(section: _Section, section_text: str,
         f"\n【動画全体の映像タイムライン（参考情報）】\n{visual_timeline}\n"
         if visual_timeline else ""
     )
+    # 全セクション共通（セクション固有の文言を混ぜないこと）
+    shared_context = (
+        f"動画「{title}」の要約を作成しています。\n"
+        f"以下は動画全体のアウトライン（全{n}セクション）です：\n\n"
+        f"{outline_list}\n"
+        f"{desc_block}{vision_block}"
+    )
+    system_blocks = [
+        {"type": "text", "text": system_prompt},
+        {"type": "text", "text": shared_context, "cache_control": {"type": "ephemeral"}},
+    ]
+
     must_cover_block = ""
     if section.must_cover:
         must_cover_lines = "\n".join(f"- {point}" for point in section.must_cover)
         must_cover_block = (
-            "\n【必ず本文へ反映する要点】\n"
+            "【必ず本文へ反映する要点】\n"
             f"{must_cover_lines}\n"
-            "字幕区間に実際に裏付けがある要点は、短くまとめてもよいので必ず残してください。\n"
+            "字幕区間に実際に裏付けがある要点は、短くまとめてもよいので必ず残してください。\n\n"
         )
     user_prompt = (
-        f"動画「{title}」の要約を作成しています。\n"
-        f"以下は動画全体のアウトライン（全{n}セクション）です：\n\n"
-        f"{outline_list}\n"
-        f"{desc_block}{vision_block}{must_cover_block}\n"
+        f"{must_cover_block}"
         f"今回はセクション{idx+1}「{section.heading}」（{start_label}〜{end_label}）を要約してください。\n\n"
         f"【headingのルール】\n"
         f"- 「何についての話か」＋「その結論・評価」を20〜40字の一文で表してください。\n"
@@ -1341,15 +1359,29 @@ def stage2_summarize_section(section: _Section, section_text: str,
         f"セクションの字幕テキスト:\n{section_text}"
     )
 
+    text_messages = [{"role": "user", "content": user_prompt}]
     messages = [
         {"role": "user", "content": (
             _build_multimodal_user_content(user_prompt, section_images, image_detail)
             if section_images else user_prompt
         )},
     ]
+    return system_blocks, messages, text_messages
+
+
+def stage2_summarize_section(section: _Section, section_text: str,
+                              outline: _OutlineResult, title: str, idx: int,
+                              description: str = None, section_images=None,
+                              visual_timeline: str = None, image_detail="low") -> _SectionSummary:
+    """Stage 2: 1セクション分の字幕テキストを要約して _SectionSummary を返す"""
+    system_blocks, messages, text_messages = _build_stage2_request(
+        section, section_text, outline, title, idx, description=description,
+        section_images=section_images, visual_timeline=visual_timeline,
+        image_detail=image_detail,
+    )
     try:
         response = client.messages.parse(
-            model=MODEL_STAGE2, max_tokens=16000, system=system_prompt,
+            model=MODEL_STAGE2, max_tokens=16000, system=system_blocks,
             messages=messages, output_format=_SectionSummary,
         )
     except Exception as e:
@@ -1359,8 +1391,8 @@ def stage2_summarize_section(section: _Section, section_text: str,
         response = client.messages.parse(
             model=MODEL_STAGE2,
             max_tokens=16000,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
+            system=system_blocks,
+            messages=text_messages,
             output_format=_SectionSummary,
         )
     count_tokens(response, MODEL_STAGE2)
@@ -1369,11 +1401,111 @@ def stage2_summarize_section(section: _Section, section_text: str,
     return parsed
 
 
+def _strict_schema(model_cls) -> dict:
+    """Pydantic モデルから構造化出力用の厳密な JSON Schema を作る。
+
+    全 object に additionalProperties: False を付け、全プロパティを required にする。
+    """
+    schema = model_cls.model_json_schema()
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("type") == "object" or "properties" in node:
+                node["additionalProperties"] = False
+                node["required"] = list(node.get("properties", {}).keys())
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(schema)
+    return schema
+
+
+BATCH_POLL_INTERVAL_SEC = 10
+BATCH_TIMEOUT_SEC = 20 * 60
+
+
+def _stage2_batch_summarize(task_args: dict, n: int) -> dict:
+    """Message Batches で Stage 2 を実行する。
+
+    task_args: {idx: _build_stage2_request に渡す引数の dict}
+    戻り値: {idx: _SectionSummary}（失敗したセクションは含まれない）。
+    バッチ作成自体の例外は呼び出し側へ伝播する。
+    """
+    import time
+    schema = _strict_schema(_SectionSummary)
+    requests = []
+    for idx, kwargs in task_args.items():
+        system_blocks, messages, _ = _build_stage2_request(**kwargs)
+        requests.append({
+            "custom_id": f"sec-{idx}",
+            "params": {
+                "model": MODEL_STAGE2,
+                "max_tokens": 16000,
+                "system": system_blocks,
+                "messages": messages,
+                "output_config": {"format": {"type": "json_schema", "schema": schema}},
+            },
+        })
+    batch = client.messages.batches.create(requests=requests)
+    print(f"  [Stage 2] Batch作成: {batch.id}（{len(requests)}件）。完了まで待機します（最大{BATCH_TIMEOUT_SEC // 60}分）")
+
+    deadline = time.monotonic() + BATCH_TIMEOUT_SEC
+    ended = False
+    while time.monotonic() < deadline:
+        time.sleep(BATCH_POLL_INTERVAL_SEC)
+        try:
+            status = client.messages.batches.retrieve(batch.id).processing_status
+        except Exception as e:
+            print(f"  [Stage 2] Batch状態取得エラー（継続）: {e}")
+            continue
+        if status == "ended":
+            ended = True
+            break
+    if not ended:
+        print("  [Stage 2] Batchが時間内に完了しませんでした。キャンセルして通常実行へ切り替えます")
+        try:
+            client.messages.batches.cancel(batch.id)
+        except Exception as e:
+            print(f"  [Stage 2] Batchキャンセル失敗: {e}")
+        return {}
+
+    results = {}
+    try:
+        for entry in client.messages.batches.results(batch.id):
+            cid = getattr(entry, "custom_id", "")
+            try:
+                idx = int(cid.split("-", 1)[1])
+                result = entry.result
+                if getattr(result, "type", None) != "succeeded":
+                    print(f"  [Stage 2] セクション {idx+1}/{n} Batch結果: {getattr(result, 'type', '?')}")
+                    continue
+                message = result.message
+                _add_usage(message.usage, MODEL_STAGE2)
+                text = next((b.text for b in message.content
+                             if getattr(b, "type", None) == "text"), None)
+                if text is None:
+                    raise ValueError("textブロックなし")
+                parsed = _SectionSummary.model_validate_json(text)
+                parsed.summary = _clean_model_markdown(parsed.summary)
+                results[idx] = parsed
+            except Exception as e:
+                print(f"  [Stage 2] Batch結果 {cid} の解析に失敗: {e}")
+    except Exception as e:
+        print(f"  [Stage 2] Batch結果の取得に失敗: {e}")
+    return results
+
+
 def stage2_summarize_all_parallel(vtt_entries, outline: _OutlineResult, title: str,
                                   description: str = None, vision_images=None,
                                   visual_timeline: str = None, image_limit=6,
-                                  image_detail="low") -> list:
-    """Stage 2: 全セクションを ThreadPoolExecutor で並列要約する。
+                                  image_detail="low", batch_mode=False) -> list:
+    """Stage 2: 全セクションを要約する。
+
+    通常: 先頭1セクションを同期実行（プロンプトキャッシュ書き込み）→ 残りを ThreadPoolExecutor で並列実行。
+    batch_mode=True: Message Batches（約50%引き）で実行し、失敗したセクションだけ通常呼び出しでリトライ。
 
     戻り値: セクション順に並んだ要約文字列のリスト
     """
@@ -1381,7 +1513,7 @@ def stage2_summarize_all_parallel(vtt_entries, outline: _OutlineResult, title: s
     n = len(sections)
     results = [None] * n
 
-    def task(idx):
+    def section_kwargs(idx):
         sec = sections[idx]
         end_sec = sections[idx + 1].start_seconds if idx + 1 < n else float('inf')
         section_text = build_section_text(vtt_entries, sec.start_seconds, end_sec, timestamps=False)
@@ -1391,32 +1523,59 @@ def stage2_summarize_all_parallel(vtt_entries, outline: _OutlineResult, title: s
             vision_images,
             limit=image_limit,
         ) if vision_images else None
-        summary = stage2_summarize_section(
-            sec, section_text, outline, title, idx, description=description,
-            section_images=section_images, visual_timeline=visual_timeline,
-            image_detail=image_detail,
+        return dict(
+            section=sec, section_text=section_text, outline=outline, title=title,
+            idx=idx, description=description, section_images=section_images,
+            visual_timeline=visual_timeline, image_detail=image_detail,
         )
-        return idx, summary
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(task, i): i for i in range(n)}
-        for future in as_completed(futures):
+    def task(idx):
+        return idx, stage2_summarize_section(**section_kwargs(idx))
+
+    def run_one_with_retry(idx):
+        try:
+            _, results[idx] = task(idx)
+            print(f"  [Stage 2] セクション {idx+1}/{n} 完了")
+        except Exception as e:
+            print(f"  [Stage 2] セクション {idx+1}/{n} でエラー: {e} → リトライ中...")
             try:
-                idx, summary = future.result()
+                _, results[idx] = task(idx)
+                print(f"  [Stage 2] セクション {idx+1}/{n} リトライ成功")
+            except Exception as e2:
+                print(f"  [Stage 2] セクション {idx+1}/{n} リトライ失敗: {e2}")
+                results[idx] = _SectionSummary(
+                    heading=sections[idx].heading,
+                    summary="（このセクションの要約を生成できませんでした）"
+                )
+
+    pending = list(range(n))
+
+    if batch_mode and n:
+        try:
+            batch_results = _stage2_batch_summarize(
+                {i: section_kwargs(i) for i in pending}, n,
+            )
+            for idx, summary in batch_results.items():
                 results[idx] = summary
-                print(f"  [Stage 2] セクション {idx+1}/{n} 完了")
-            except Exception as e:
-                idx = futures[future]
-                print(f"  [Stage 2] セクション {idx+1}/{n} でエラー: {e} → リトライ中...")
-                try:
-                    _, results[idx] = task(idx)
-                    print(f"  [Stage 2] セクション {idx+1}/{n} リトライ成功")
-                except Exception as e2:
-                    print(f"  [Stage 2] セクション {idx+1}/{n} リトライ失敗: {e2}")
-                    results[idx] = _SectionSummary(
-                        heading=sections[idx].heading,
-                        summary="（このセクションの要約を生成できませんでした）"
-                    )
+                print(f"  [Stage 2] セクション {idx+1}/{n} 完了（Batch）")
+            pending = [i for i in pending if results[i] is None]
+            if pending:
+                print(f"  [Stage 2] Batch未完了の{len(pending)}セクションを通常実行でリトライします")
+        except Exception as e:
+            print(f"  [Stage 2] Batch実行に失敗、通常の並列実行へフォールバック: {e}")
+            pending = list(range(n))
+
+    # 先頭の1セクションを先に同期実行してプロンプトキャッシュを書き込み、
+    # 残りを並列実行（キャッシュ読み取りを効かせる）
+    if pending:
+        first = pending.pop(0)
+        run_one_with_retry(first)
+
+    if pending:
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(run_one_with_retry, i) for i in pending]
+            for f in futures:
+                f.result()
 
     return results
 
@@ -1650,7 +1809,7 @@ def assemble_markdown(outline: _OutlineResult, summaries: list, title: str) -> s
 
 def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None,
                   thumbnail_path=None, images_future=None, description=None,
-                  vision_mode="off"):
+                  vision_mode="off", batch_mode=False):
     """字幕ファイルを要約してHTMLを生成する（3パス方式）
 
     images_future: concurrent.futures.Future を渡すと、HTML生成直前に
@@ -1705,6 +1864,7 @@ def yoyaku_gemini(vtt, title, output_html_path, images=None, detail_text=None,
         vtt_entries, outline, title, description=description,
         vision_images=vision_images, visual_timeline=None,
         image_limit=image_limit, image_detail=image_detail,
+        batch_mode=batch_mode,
     )
 
     # ── Coverage: 元字幕との照合（不足情報だけを追記）──────────────────────
@@ -2542,7 +2702,8 @@ def filter_description(description: str, title: str) -> str:
         return None
 
 def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=False,
-       thumbnail_path=None, images_future=None, description=None, vision_mode="off"):
+       thumbnail_path=None, images_future=None, description=None, vision_mode="off",
+       batch_mode=False):
     """
     VTTファイルを要約してHTMLを生成する
 
@@ -2581,6 +2742,7 @@ def do(vtt_path, video_title, output_dir, url=None, images=None, detail_mode=Fal
     yoyaku_gemini(
         vtt, title, html_path, images, detail_text, thumbnail_path,
         images_future=images_future, description=description, vision_mode=vision_mode,
+        batch_mode=batch_mode,
     )
 
     # トークン使用量サマリーを表示

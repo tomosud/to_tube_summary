@@ -502,6 +502,11 @@ def is_detail_mode():
     """詳細モードかどうかを判定"""
     return "--detail" in sys.argv
 
+def is_batch_mode():
+    """Stage 2 を Message Batches（約50%引き・低速）で実行するか。"""
+    return "--batch" in sys.argv
+
+
 def get_vision_mode():
     """画像を要約に利用するモードを取得する。"""
     if "--vision" in sys.argv:
@@ -575,6 +580,9 @@ def process_video(url):
             # 詳細モードかどうかを確認
             detail_mode = is_detail_mode()
             vision_mode = get_vision_mode()
+            batch_mode = is_batch_mode()
+            if batch_mode:
+                print("Batchモード（Stage 2を Message Batches で実行）")
             if detail_mode:
                 print("詳細モードで実行中...")
             if vision_mode != "off":
@@ -611,6 +619,7 @@ def process_video(url):
                     result, video_title, output_dir, video_url,
                     images_future=images_future, detail_mode=detail_mode,
                     description=description_filtered, vision_mode=vision_mode,
+                    batch_mode=batch_mode,
                 )
             print(f"要約HTMLが作成されました: {html_path}")
             
