@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="template-version" content="24">
+<meta name="template-version" content="25">
 <style>
 body{font-family:system-ui,"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;line-height:1.62;padding:.7em 1em;background:#121212;color:#e8e8e8;max-width:840px;margin:0 auto;box-sizing:border-box;font-size:15px;position:relative}
 h1{color:#ff9800;font-size:1.35em;line-height:1.35;border-bottom:1px solid #333;padding-bottom:.2em;margin:.5em 0 .4em}
@@ -28,13 +28,13 @@ a{color:#4fc3f7;text-decoration:none}
 .video-thumbnail{max-width:640px;width:100%;border-radius:6px;margin:.6em 0;box-shadow:0 2px 6px rgba(0,0,0,.3)}
 .description-block{background:#1a1a1a;border:1px solid #333;border-radius:6px;padding:8px 12px;margin:.6em 0;font-size:0.88em;color:#bbb;line-height:1.55em}
 .description-block a{color:#4fc3f7}
-.desc-visible{white-space:pre-wrap}
+.desc-line{white-space:pre-wrap;overflow-wrap:anywhere}
+.desc-line:empty{height:.75em}
 .desc-details{margin-top:6px}
 .desc-details summary{cursor:pointer;color:#777;font-size:0.9em;user-select:none;list-style:none;padding:2px 0}
 .desc-details summary::before{content:'▶ '}
 .desc-details[open] summary::before{content:'▼ '}
 .desc-details summary:hover{color:#ccc}
-.desc-more{white-space:pre-wrap}
 .desc-close-btn{display:block;margin:10px auto 2px;background:none;border:1px solid #555;color:#888;cursor:pointer;font-size:0.85em;padding:3px 16px;border-radius:4px}
 .desc-close-btn:hover{color:#ccc;border-color:#aaa}
 html{overflow-x:hidden}
@@ -75,6 +75,55 @@ html{overflow-x:hidden}
 .transcript-cue.is-active .transcript-time{background:#174d70;color:#bfe7ff}
 .transcript-text{min-width:0}
 .transcript-toggle{position:fixed;z-index:190;right:14px;bottom:14px;border:1px solid #555;border-radius:22px;background:#242424;color:#eee;padding:9px 14px;box-shadow:0 4px 16px rgba(0,0,0,.4);cursor:pointer}
+.timestamp-section>h2[data-ts],.timestamp-section>h3[data-ts],.timestamp-section>h4[data-ts]{position:relative;border-bottom:none;border-left:4px solid #ff9800;border-radius:0 5px 5px 0;background:linear-gradient(90deg,rgba(255,152,0,.16),rgba(255,152,0,.04) 55%,transparent);padding:.22em .5em .22em .6em;margin-top:.15em;margin-bottom:.35em;scroll-margin-top:56px}
+.timestamp-section>h2[data-ts]{font-size:1.24em;font-weight:800;color:#ffa726;letter-spacing:.01em}
+.timestamp-section>h3[data-ts],.timestamp-section>h4[data-ts]{border-left-width:3px;border-left-color:#ffb74d;font-size:1.06em}
+.timestamp-section{scroll-margin-top:56px}
+.heading-ts{display:inline-block;margin-left:.35em;padding:0 .4em;border-radius:4px;font-size:.72em;font-weight:600;color:#ffcc80;background:rgba(255,152,0,.14);vertical-align:.12em;white-space:nowrap;cursor:pointer;font-variant-numeric:tabular-nums;transition:background .12s,color .12s}
+.heading-ts::before{content:'▶ ';font-size:.8em}
+.heading-ts:hover,.heading-ts:focus-visible{background:#ff9800;color:#111;text-decoration:underline;outline:none}
+.secnav-chip{position:fixed;z-index:185;display:flex;align-items:stretch;height:30px;max-width:520px;box-sizing:border-box;border:1px solid rgba(255,152,0,.35);border-radius:16px;background:rgba(22,22,22,.86);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);box-shadow:0 3px 12px rgba(0,0,0,.45);font-size:12.5px;color:#ffcc80;opacity:.82;transition:opacity .15s,transform .18s,border-color .15s,visibility .18s;overflow:hidden}
+.secnav-chip:hover,.secnav-chip:focus-within{opacity:1;border-color:#ff9800}
+.secnav-chip.is-hidden{opacity:0;visibility:hidden;pointer-events:none}
+.secnav-top{top:8px}
+.secnav-top.is-hidden{transform:translateY(-8px)}
+.secnav-bottom{bottom:12px}
+.secnav-bottom.is-hidden{transform:translateY(8px)}
+.secnav-chip button{font:inherit;color:inherit;background:transparent;border:0;cursor:pointer;padding:0;margin:0}
+.secnav-toc-btn{flex:0 0 auto;display:flex;align-items:center;gap:4px;padding:0 9px 0 11px !important;border-right:1px solid rgba(255,152,0,.25) !important;color:#ffb74d !important;font-variant-numeric:tabular-nums}
+.secnav-toc-btn:hover,.secnav-toc-btn:focus-visible{background:rgba(255,152,0,.18) !important;outline:none}
+.secnav-toc-icon{font-size:15px;line-height:1}
+.secnav-count{font-size:11px;color:#bbb}
+.secnav-jump{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:6px;padding:0 13px 0 9px !important;text-align:left}
+.secnav-jump:hover,.secnav-jump:focus-visible{background:rgba(255,152,0,.12) !important;outline:none}
+.secnav-arrow{flex:0 0 auto;color:#ff9800;font-weight:700}
+.secnav-time{flex:0 0 auto;color:#999;font-size:11px;font-variant-numeric:tabular-nums}
+.secnav-label{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:#eee}
+.toc-backdrop{position:fixed;inset:0;z-index:240;background:rgba(0,0,0,.42);opacity:0;visibility:hidden;transition:opacity .15s,visibility .15s}
+.toc-backdrop.is-open{opacity:1;visibility:visible}
+.toc-panel{position:fixed;z-index:241;top:8px;width:440px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);display:flex;flex-direction:column;box-sizing:border-box;background:#1b1b1b;border:1px solid #4a3a22;border-radius:12px;box-shadow:0 14px 44px rgba(0,0,0,.7);overflow:hidden;opacity:0;visibility:hidden;transform:translateY(-6px);transition:opacity .15s,transform .15s,visibility .15s}
+.toc-panel.is-open{opacity:1;visibility:visible;transform:none}
+.toc-head{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:9px 10px 9px 14px;border-bottom:1px solid #333;background:#202020}
+.toc-title{flex:1;font-weight:700;color:#ff9800;font-size:.95rem}
+.toc-hint{font-size:11px;color:#777}
+.toc-close{border:0;background:transparent;color:#aaa;font-size:22px;line-height:1;cursor:pointer;padding:2px 6px;border-radius:6px}
+.toc-close:hover{color:#fff;background:#333}
+.toc-list{list-style:none;margin:0;padding:6px;overflow-y:auto;overscroll-behavior:contain;scrollbar-color:#666 transparent}
+.toc-list li{margin:0;display:flex;align-items:stretch;border-radius:7px}
+.toc-item{flex:1;min-width:0;display:flex;align-items:baseline;gap:8px;text-align:left;font:inherit;font-size:13.5px;line-height:1.4;color:#ccc;background:transparent;border:0;border-left:3px solid transparent;border-radius:7px;padding:6px 8px;cursor:pointer}
+.toc-item:hover,.toc-item:focus-visible{background:#2a2a2a;color:#fff;outline:none}
+.toc-item:focus-visible{box-shadow:inset 0 0 0 1px #ff9800}
+.toc-num{flex:0 0 auto;color:#666;font-size:11px;min-width:1.6em;text-align:right;font-variant-numeric:tabular-nums}
+.toc-text{min-width:0}
+.toc-lv1 .toc-item{color:#ffb74d;font-weight:700}
+.toc-lv3 .toc-item{padding-left:20px}
+.toc-lv4 .toc-item{padding-left:32px}
+.toc-time{flex:0 0 auto;align-self:center;margin-right:4px;border:0;border-radius:10px;background:#333;color:#bbb;font:inherit;font-size:11px;padding:1px 7px;cursor:pointer;font-variant-numeric:tabular-nums}
+.toc-time:hover,.toc-time:focus-visible{background:#ff9800;color:#111;outline:none}
+.toc-list li.is-current .toc-item{background:rgba(255,152,0,.13);border-left-color:#ff9800;color:#fff}
+.toc-list li.is-current .toc-num{color:#ff9800}
+@media (max-width:600px){.toc-panel{top:auto;bottom:0;left:0 !important;width:100vw;max-width:100vw;max-height:78vh;border-radius:14px 14px 0 0;transform:translateY(16px)}.toc-panel.is-open{transform:none}.toc-item{padding:9px 8px;font-size:14px}.toc-hint{display:none}}
+@media (prefers-reduced-motion:reduce){.secnav-chip,.toc-panel,.toc-backdrop{transition:none}}
 @media (max-width:1180px){.filmstrip-rail{display:none}}
 @media (min-width:1181px){body{max-width:960px;margin-left:220px;margin-right:24px}}
 @media (min-width:1280px){body{margin-right:400px}.transcript-panel{transform:none}.transcript-toggle,.transcript-close{display:none}}
@@ -192,6 +241,7 @@ html{overflow-x:hidden}
   var TEXT_AVOID_GAP = 18;
   var textAvoidScheduled = false;
   var keepActiveTranscriptVisible = function() {};
+  var scheduleSectionNav = function() {};
 
   function ensureGlobalVideoPlayer() {
     if (globalVideo.shell) return;
@@ -570,6 +620,7 @@ html{overflow-x:hidden}
     shell.style.height = Math.round(height) + 'px';
     shell.classList.toggle('is-docked', docked);
     keepActiveTranscriptVisible();
+    scheduleSectionNav();
     scheduleGlobalVideoTextAvoidance();
   }
 
@@ -690,6 +741,7 @@ html{overflow-x:hidden}
     }
     keepActiveTranscriptVisible();
     clearGlobalVideoTextAvoidance();
+    scheduleSectionNav();
   }
 
   window.addEventListener('scroll', scheduleGlobalVideoPosition, { passive: true });
@@ -746,22 +798,21 @@ html{overflow-x:hidden}
   }
 
   // --- Description 構築関数（h1 直後に挿入するため関数化）---
+  // 1行=1ブロック要素。'\n' テキストノード＋pre-wrap 方式はブラウザ翻訳で改行が失われるため使わない
   function makeDescLine(line) {
+    var div = document.createElement('div');
+    div.className = 'desc-line';
     var urlRe = /https?:\/\/[^\s)]+/g;
-    if (!urlRe.test(line)) { return document.createTextNode(line + '\n'); }
-    urlRe.lastIndex = 0;
-    var frag = document.createDocumentFragment();
     var lastIdx = 0, m;
     while ((m = urlRe.exec(line)) !== null) {
-      if (m.index > lastIdx) frag.appendChild(document.createTextNode(line.slice(lastIdx, m.index)));
+      if (m.index > lastIdx) div.appendChild(document.createTextNode(line.slice(lastIdx, m.index)));
       var a = document.createElement('a');
       a.href = m[0]; a.target = '_blank'; a.rel = 'noopener'; a.textContent = m[0];
-      frag.appendChild(a);
+      div.appendChild(a);
       lastIdx = m.index + m[0].length;
     }
-    if (lastIdx < line.length) frag.appendChild(document.createTextNode(line.slice(lastIdx)));
-    frag.appendChild(document.createTextNode('\n'));
-    return frag;
+    if (lastIdx < line.length) div.appendChild(document.createTextNode(line.slice(lastIdx)));
+    return div;
   }
 
   function buildDescriptionBlock() {
@@ -769,7 +820,15 @@ html{overflow-x:hidden}
     var descDiv = document.createElement('div');
     descDiv.className = 'description-block';
     descDiv.setAttribute('translate', 'yes');
-    var descLines = data.description.split('\n');
+    // 末尾の空白・空行を削り、3行以上続く空行は2行へ畳む（データは変更せず表示側で整形）
+    var descText = String(data.description)
+      .replace(/\r\n?/g, '\n')
+      .replace(/[ \t\u3000]+$/gm, '')
+      .replace(/^\s*\n/, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .replace(/\s+$/, '');
+    if (!descText) return null;
+    var descLines = descText.split('\n');
     var VISIBLE_LINES = 5;
     var visibleDiv = document.createElement('div');
     visibleDiv.className = 'desc-visible';
@@ -802,6 +861,22 @@ html{overflow-x:hidden}
   }
   var descInserted = false;
 
+  // 見出し末尾の「（動画：X分Y秒頃）」を本文と時刻表記に分ける
+  function splitHeadingTime(heading) {
+    heading = heading || '';
+    var m = /\s*([（(]\s*動画\s*[：:][^（）()]*[）)])\s*$/.exec(heading);
+    if (!m || !m.index) return { text: heading, time: '' };
+    return { text: heading.slice(0, m.index), time: m[1] };
+  }
+  function onSeekClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    startGlobalVideoAtTime(Number(this.getAttribute('data-video-time')));
+  }
+  function onSeekKey(e) {
+    if (e.key === 'Enter' || e.key === ' ') onSeekClick.call(this, e);
+  }
+
   // --- 詳細へのジャンプリンク ---
   if (data.detail) {
     var jumpDiv = document.createElement('div');
@@ -822,7 +897,24 @@ html{overflow-x:hidden}
       if (level < 1) level = 1;
       if (level > 4) level = 4;
       var h = document.createElement('h' + level);
-      h.textContent = sec.heading;
+      var headingParts = splitHeadingTime(sec.heading);
+      if (headingParts.time && sec.timestamp != null) {
+        // 見出し末尾の「（動画：X分Y秒頃）」だけを動画シーク用のクリック対象にする
+        h.textContent = headingParts.text;
+        var tsSpan = document.createElement('span');
+        tsSpan.className = 'heading-ts';
+        tsSpan.textContent = headingParts.time;
+        tsSpan.setAttribute('role', 'button');
+        tsSpan.setAttribute('tabindex', '0');
+        tsSpan.setAttribute('title', 'この時刻から動画を再生');
+        tsSpan.setAttribute('data-video-time', sec.timestamp);
+        tsSpan.addEventListener('click', onSeekClick);
+        tsSpan.addEventListener('keydown', onSeekKey);
+        h.appendChild(tsSpan);
+      } else {
+        h.textContent = sec.heading;
+      }
+      h.setAttribute('data-heading-label', headingParts.text || sec.heading);
       if (sec.timestamp != null) h.setAttribute('data-ts', sec.timestamp);
       sectionDiv.appendChild(h);
     }
@@ -1171,6 +1263,282 @@ html{overflow-x:hidden}
   buildFilmstrip();
   // 画像読込でレイアウトが確定した後に再計算（アンカーY座標がずれるため）
   window.addEventListener('load', buildFilmstrip);
+
+  // --- 見出しナビ：画面上下の「その方向の次の見出し」チップ＋展開式目次 ---
+  function buildSectionNav() {
+    var NAV_OFFSET = 48;      // ジャンプ後に見出しを置く位置（上端チップの下）
+    var CHIP_GAP = 10;
+    var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    var heads = [];
+    var hs = document.querySelectorAll('.timestamp-section > h1, .timestamp-section > h2, .timestamp-section > h3, .timestamp-section > h4, #detail-section > h2');
+    for (var i = 0; i < hs.length; i++) {
+      var el = hs[i];
+      var tsAttr = el.getAttribute('data-ts');
+      var ts = tsAttr == null ? null : parseFloat(tsAttr);
+      heads.push({
+        el: el,
+        label: (el.getAttribute('data-heading-label') || el.textContent || '').replace(/\s+/g, ' ').trim(),
+        ts: ts == null || isNaN(ts) ? null : ts,
+        level: Number(el.tagName.charAt(1)) || 2
+      });
+    }
+    if (heads.length < 2) return;
+
+    function mk(tag, cls, text) {
+      var e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text != null) e.textContent = text;
+      return e;
+    }
+
+    // --- チップ ---
+    function makeChip(dir) {
+      var chip = mk('div', 'secnav-chip secnav-' + dir + ' is-hidden');
+      chip.setAttribute('role', 'navigation');
+      chip.setAttribute('aria-label', dir === 'top' ? '前の見出し' : '次の見出し');
+      var tocBtn = mk('button', 'secnav-toc-btn');
+      tocBtn.type = 'button';
+      tocBtn.setAttribute('aria-label', '目次を開く');
+      tocBtn.setAttribute('aria-haspopup', 'dialog');
+      tocBtn.title = '目次（見出し一覧）';
+      tocBtn.appendChild(mk('span', 'secnav-toc-icon', '☰'));
+      var count = mk('span', 'secnav-count', '');
+      tocBtn.appendChild(count);
+      var jump = mk('button', 'secnav-jump');
+      jump.type = 'button';
+      jump.appendChild(mk('span', 'secnav-arrow', dir === 'top' ? '↑' : '↓'));
+      var time = mk('span', 'secnav-time', '');
+      var label = mk('span', 'secnav-label', '');
+      jump.appendChild(time);
+      jump.appendChild(label);
+      chip.appendChild(tocBtn);
+      chip.appendChild(jump);
+      document.body.appendChild(chip);
+      tocBtn.addEventListener('click', function() { openToc(tocBtn); });
+      jump.addEventListener('click', function() {
+        var idx = Number(jump.getAttribute('data-target'));
+        if (!isNaN(idx) && heads[idx]) scrollToHead(idx);
+      });
+      return { chip: chip, count: count, jump: jump, time: time, label: label };
+    }
+    var topChip = makeChip('top');
+    var bottomChip = makeChip('bottom');
+
+    function scrollToHead(idx) {
+      var y = heads[idx].el.getBoundingClientRect().top + window.pageYOffset - NAV_OFFSET;
+      window.scrollTo({ top: Math.max(0, y), behavior: (reduceMotion || document.hidden) ? 'auto' : 'smooth' });
+    }
+
+    function setChipTarget(c, idx, visible) {
+      c.chip.classList.toggle('is-hidden', !visible);
+      c.chip.setAttribute('aria-hidden', visible ? 'false' : 'true');
+      c.jump.tabIndex = visible ? 0 : -1;
+      c.chip.querySelector('.secnav-toc-btn').tabIndex = visible ? 0 : -1;
+      if (idx < 0) return;
+      var h = heads[idx];
+      c.jump.setAttribute('data-target', idx);
+      c.time.textContent = h.ts != null ? formatClock(h.ts) : '';
+      c.time.style.display = h.ts != null ? '' : 'none';
+      c.label.textContent = h.label;
+      c.jump.title = h.label;
+      c.jump.setAttribute('aria-label', (c === topChip ? '前の見出しへ: ' : '次の見出しへ: ') + h.label);
+    }
+
+    function visibleRect(node) {
+      if (!node) return null;
+      var cs = window.getComputedStyle(node);
+      if (cs.display === 'none' || cs.visibility === 'hidden') return null;
+      var r = node.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0 || r.right <= 0 || r.left >= window.innerWidth) return null;
+      return r;
+    }
+
+    // 本文カラムの左端に揃え、右上dockの動画・右下の字幕トグルを避ける
+    function layoutChips() {
+      var body = document.body;
+      var br = body.getBoundingClientRect();
+      var bcs = window.getComputedStyle(body);
+      var left = Math.max(8, br.left + (parseFloat(bcs.paddingLeft) || 0));
+      var right = Math.min(window.innerWidth - 8, br.right - (parseFloat(bcs.paddingRight) || 0));
+      var maxW = Math.max(120, Math.min(520, right - left));
+
+      var topTop = 8, topMax = maxW;
+      var ob = getGlobalVideoObstructionRect();
+      if (ob && ob.top < topTop + 30 + CHIP_GAP && ob.right > left) {
+        var avail = ob.left - CHIP_GAP - left;
+        if (avail >= 200) topMax = Math.min(maxW, avail);
+        else topTop = Math.round(ob.bottom + 8); // 狭い画面では動画（＋字幕）の下へ逃がす
+      }
+      topChip.chip.style.left = left + 'px';
+      topChip.chip.style.top = topTop + 'px';
+      topChip.chip.style.maxWidth = topMax + 'px';
+
+      var bottomMax = maxW;
+      var toggle = visibleRect(document.querySelector('.transcript-toggle'));
+      if (toggle && toggle.top < window.innerHeight - 12 && toggle.left < left + maxW + CHIP_GAP) {
+        bottomMax = Math.min(bottomMax, toggle.left - CHIP_GAP - left);
+      }
+      if (ob && ob.bottom > window.innerHeight - 12 - 30 - CHIP_GAP && ob.left < left + bottomMax + CHIP_GAP) {
+        bottomMax = Math.min(bottomMax, Math.max(120, ob.left - CHIP_GAP - left));
+      }
+      bottomChip.chip.style.left = left + 'px';
+      bottomChip.chip.style.maxWidth = Math.max(120, bottomMax) + 'px';
+      return left;
+    }
+
+    var currentIdx = 0;
+    var navScheduled = false;
+    function updateNav() {
+      navScheduled = false;
+      layoutChips();
+      var marker = window.innerHeight * 0.3;
+      var cur = 0, upIdx = -1, downIdx = -1;
+      for (var k = 0; k < heads.length; k++) {
+        var top = heads[k].el.getBoundingClientRect().top;
+        if (top <= marker) cur = k;
+        if (top < NAV_OFFSET - 8) upIdx = k;
+        if (downIdx < 0 && top > NAV_OFFSET + 8) downIdx = k;
+      }
+      currentIdx = cur;
+      var doc = document.documentElement;
+      var atTop = window.pageYOffset < 40;
+      var atBottom = window.pageYOffset + window.innerHeight >= doc.scrollHeight - 8;
+      setChipTarget(topChip, upIdx, !atTop && upIdx >= 0 && !tocOpen);
+      setChipTarget(bottomChip, downIdx, !atBottom && downIdx >= 0 && !tocOpen);
+      var countText = (cur + 1) + '/' + heads.length;
+      topChip.count.textContent = countText;
+      bottomChip.count.textContent = countText;
+    }
+    scheduleSectionNav = function() {
+      if (navScheduled) return;
+      navScheduled = true;
+      if (document.hidden) setTimeout(updateNav, 0); // 非表示タブでは rAF が止まるため
+      else window.requestAnimationFrame(updateNav);
+    };
+
+    // --- 目次パネル ---
+    var tocOpen = false;
+    var lastFocus = null;
+    var backdrop = mk('div', 'toc-backdrop');
+    var panel = mk('div', 'toc-panel');
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-label', '目次');
+    panel.setAttribute('translate', 'yes');
+    var head = mk('div', 'toc-head');
+    head.appendChild(mk('span', 'toc-title', '目次'));
+    head.appendChild(mk('span', 'toc-hint', '↑↓で移動・Escで閉じる'));
+    var closeBtn = mk('button', 'toc-close', '×');
+    closeBtn.type = 'button';
+    closeBtn.setAttribute('aria-label', '目次を閉じる');
+    head.appendChild(closeBtn);
+    panel.appendChild(head);
+    var list = mk('ul', 'toc-list');
+    var items = [];
+    var num = 0;
+    for (var t = 0; t < heads.length; t++) {
+      var h = heads[t];
+      var li = mk('li', 'toc-lv' + Math.min(4, Math.max(1, h.level)));
+      var item = mk('button', 'toc-item');
+      item.type = 'button';
+      item.setAttribute('data-idx', t);
+      item.appendChild(mk('span', 'toc-num', h.ts != null ? String(++num) : '•'));
+      item.appendChild(mk('span', 'toc-text', h.label));
+      item.addEventListener('click', function() {
+        var idx = Number(this.getAttribute('data-idx'));
+        closeToc(false);
+        scrollToHead(idx);
+      });
+      li.appendChild(item);
+      if (h.ts != null) {
+        // 時刻バッジ：クリックで動画をその時刻へシーク（項目本体はページ内ジャンプ）
+        var tb = mk('button', 'toc-time', formatClock(h.ts));
+        tb.type = 'button';
+        tb.title = 'この時刻から動画を再生';
+        tb.setAttribute('aria-label', formatClock(h.ts) + ' から動画を再生');
+        tb.setAttribute('data-video-time', h.ts);
+        tb.addEventListener('click', function() {
+          var sec = Number(this.getAttribute('data-video-time'));
+          closeToc(false);
+          startGlobalVideoAtTime(sec);
+        });
+        li.appendChild(tb);
+      }
+      list.appendChild(li);
+      items.push(li);
+    }
+    panel.appendChild(list);
+    document.body.appendChild(backdrop);
+    document.body.appendChild(panel);
+
+    function openToc(opener) {
+      updateNav();
+      lastFocus = opener || document.activeElement;
+      for (var q = 0; q < items.length; q++) items[q].classList.toggle('is-current', q === currentIdx);
+      var left = layoutChips();
+      var pw = Math.min(440, window.innerWidth - 16);
+      panel.style.left = Math.max(8, Math.min(left, window.innerWidth - pw - 8)) + 'px';
+      tocOpen = true;
+      panel.classList.add('is-open');
+      backdrop.classList.add('is-open');
+      topChip.chip.classList.add('is-hidden');
+      bottomChip.chip.classList.add('is-hidden');
+      var cur = items[currentIdx];
+      list.scrollTop = Math.max(0, cur.offsetTop - list.clientHeight / 2 + cur.offsetHeight / 2);
+      cur.querySelector('.toc-item').focus({ preventScroll: true });
+    }
+    function closeToc(restoreFocus) {
+      if (!tocOpen) return;
+      tocOpen = false;
+      panel.classList.remove('is-open');
+      backdrop.classList.remove('is-open');
+      if (restoreFocus !== false && lastFocus && lastFocus.focus) {
+        try { lastFocus.focus({ preventScroll: true }); } catch (err) {}
+      } else if (document.activeElement && panel.contains(document.activeElement)) {
+        document.activeElement.blur();
+      }
+      scheduleSectionNav();
+    }
+    closeBtn.addEventListener('click', function() { closeToc(); });
+    backdrop.addEventListener('click', function() { closeToc(); });
+
+    panel.addEventListener('keydown', function(e) {
+      var buttons = Array.prototype.slice.call(list.querySelectorAll('.toc-item'));
+      var pos = buttons.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (pos < 0) {
+          var timeBtn = document.activeElement && document.activeElement.closest && document.activeElement.closest('li');
+          pos = timeBtn ? items.indexOf(timeBtn) : currentIdx;
+        }
+        var next = Math.max(0, Math.min(buttons.length - 1, pos + (e.key === 'ArrowDown' ? 1 : -1)));
+        buttons[next].focus();
+        buttons[next].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Home' || e.key === 'End') {
+        e.preventDefault();
+        var b = buttons[e.key === 'Home' ? 0 : buttons.length - 1];
+        b.focus();
+        b.scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Tab') {
+        // フォーカスをパネル内に閉じ込める
+        var focusables = panel.querySelectorAll('button');
+        var first = focusables[0], last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && tocOpen) { e.preventDefault(); closeToc(); }
+    });
+
+    window.addEventListener('scroll', scheduleSectionNav, { passive: true });
+    window.addEventListener('resize', scheduleSectionNav);
+    window.addEventListener('load', scheduleSectionNav);
+    updateNav();
+  }
+
+  buildSectionNav();
 
   // --- makeEmbedUrl, embedParams は不要になったが互換性のため残す ---
 })();
