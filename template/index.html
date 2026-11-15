@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="template-version" content="27">
+<meta name="template-version" content="28">
 <style>
 body{font-family:system-ui,"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;line-height:1.62;padding:.7em 1em;background:#121212;color:#e8e8e8;max-width:840px;margin:0 auto;box-sizing:border-box;font-size:15px;position:relative}
 h1{color:#ff9800;font-size:1.35em;line-height:1.35;border-bottom:1px solid #333;padding-bottom:.2em;margin:.5em 0 .4em}
@@ -360,6 +360,9 @@ html{overflow-x:hidden}
   }
 
   function renderVideoCaption(videoTime) {
+    // 字幕拡張(YouTube Lean English)から訳が届いている間は、拡張の訳を優先し
+    // 自前の原文字幕では上書きしない。
+    if (globalVideo.extCaptionActive) return;
     var cues = data.transcript || [];
     if (!cues.length) {
       setVideoCaption('', false);
@@ -511,6 +514,20 @@ html{overflow-x:hidden}
       globalVideo.iframe.src = makeVideoLink(baseUrl, Math.floor(globalVideo.lastSec));
     }
   }
+
+  // 字幕拡張(YouTube Lean English)がembed iframe内から postMessage する訳字幕を
+  // 受け取り、動画下の字幕バーに表示する。origin・形式・送信元フレームを検証する。
+  window.addEventListener('message', function(e) {
+    if (e.origin !== 'https://www.youtube.com') return;
+    var d = e.data;
+    if (!d || d.source !== 'youtube-lean-english' || d.type !== 'caption') return;
+    if (globalVideo.player) {
+      try { if (e.source !== globalVideo.player.getIframe().contentWindow) return; } catch (err) {}
+    }
+    var text = typeof d.text === 'string' ? d.text : '';
+    if (text) globalVideo.extCaptionActive = true; // 以後は拡張の訳を優先表示
+    setVideoCaption(text, false);
+  });
 
   function createApiPlayer(sec) {
     globalVideo.pendingSec = null;
@@ -763,6 +780,7 @@ html{overflow-x:hidden}
     globalVideo.profile = null;
     globalVideo.forceDocked = false;
     globalVideo.awaitingPlaybackClick = false;
+    globalVideo.extCaptionActive = false;
     clearVideoCaptionTimers();
     setVideoCaption('', false);
     if (globalVideo.iframe) globalVideo.iframe.src = '';
