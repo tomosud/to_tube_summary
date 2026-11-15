@@ -4,6 +4,7 @@ from model_config import (
     DEFAULT_MODEL,
     calculate_usage_cost,
     get_model_pricing,
+    resolve_light_model,
     resolve_models,
     resolve_vision_select_model,
 )
@@ -37,6 +38,11 @@ class ResolveModelsTest(unittest.TestCase):
         self.assertEqual(
             resolve_vision_select_model({"ANTHROPIC_MODEL_VISION_SELECT": "x"}), "x"
         )
+
+    def test_light_model(self):
+        self.assertEqual(resolve_light_model({}), "claude-haiku-5-5")
+        self.assertEqual(resolve_light_model({"ANTHROPIC_MODEL_LIGHT": "y"}), "y")
+        self.assertEqual(resolve_light_model({"ANTHROPIC_MODEL_LIGHT": ""}), "claude-haiku-5-5")
 
 
 class PricingTest(unittest.TestCase):

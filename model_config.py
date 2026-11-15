@@ -6,6 +6,7 @@ from typing import Mapping, Optional, Tuple
 
 DEFAULT_MODEL = "claude-sonnet-5-5"
 DEFAULT_VISION_SELECT_MODEL = "claude-haiku-5-5"
+DEFAULT_LIGHT_MODEL = "claude-haiku-5-5"
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,11 @@ def resolve_models(environ: Mapping[str, str]) -> Tuple[str, str, str]:
 def resolve_vision_select_model(environ: Mapping[str, str]) -> str:
     """Return the model used for vision frame selection (cheap model by default)."""
     return environ.get("ANTHROPIC_MODEL_VISION_SELECT") or DEFAULT_VISION_SELECT_MODEL
+
+
+def resolve_light_model(environ: Mapping[str, str]) -> str:
+    """Return the lightweight model for audit, key-point extraction and auxiliary calls."""
+    return environ.get("ANTHROPIC_MODEL_LIGHT") or DEFAULT_LIGHT_MODEL
 
 
 def get_model_pricing(model: str) -> Optional[ModelPricing]:

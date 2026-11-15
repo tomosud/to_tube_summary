@@ -134,5 +134,50 @@ class Stage3Test(unittest.TestCase):
         self.assertEqual(highlights, "特徴的なポイント")
 
 
+class ContactSheetTest(unittest.TestCase):
+    def _imgs(self, n, size=(320, 180)):
+        from PIL import Image
+        return [Image.new("RGB", size, (i * 20 % 255, 100, 150)) for i in range(n)]
+
+    def test_grid_dimensions_and_rows(self):
+        import io
+        from PIL import Image
+        data, rows = summary_module._build_contact_sheet(self._imgs(10))
+        self.assertEqual(rows, 3)
+        sheet = Image.open(io.BytesIO(data))
+        self.assertEqual(sheet.format, "JPEG")
+        self.assertEqual(sheet.size, (4 * 240, 3 * 135))
+
+    def test_fewer_candidates_than_columns(self):
+        import io
+        from PIL import Image
+        data, rows = summary_module._build_contact_sheet(self._imgs(2))
+        self.assertEqual(rows, 1)
+        self.assertEqual(Image.open(io.BytesIO(data)).size, (2 * 240, 135))
+
+    def test_oversized_sheet_is_scaled_down(self):
+        import io
+        from PIL import Image
+        # 縦長画像24枚: 6行 x 427px = 2562px > 1568px
+        data, rows = summary_module._build_contact_sheet(self._imgs(24, size=(180, 320)))
+        self.assertEqual(rows, 6)
+        sheet = Image.open(io.BytesIO(data))
+        self.assertLessEqual(max(sheet.size), 1568)
+        self.assertGreaterEqual(max(sheet.size), 1566)
+
+    def test_accepts_path_tuples_and_tolerates_unreadable(self):
+        import io
+        import tempfile
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as d:
+            good = os.path.join(d, "a.jpg")
+            self._imgs(1)[0].save(good)
+            data, rows = summary_module._build_contact_sheet(
+                [(good, 0, 1), (os.path.join(d, "missing.jpg"), 1, 2)]
+            )
+        self.assertEqual(rows, 1)
+        self.assertEqual(Image.open(io.BytesIO(data)).size[0], 2 * 240)
+
+
 if __name__ == "__main__":
     unittest.main()
