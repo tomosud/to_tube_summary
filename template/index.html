@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="template-version" content="28">
+<meta name="template-version" content="29">
 <style>
 body{font-family:system-ui,"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;line-height:1.62;padding:.7em 1em;background:#121212;color:#e8e8e8;max-width:840px;margin:0 auto;box-sizing:border-box;font-size:15px;position:relative}
 h1{color:#ff9800;font-size:1.35em;line-height:1.35;border-bottom:1px solid #333;padding-bottom:.2em;margin:.5em 0 .4em}
@@ -527,6 +527,9 @@ html{overflow-x:hidden}
     var text = typeof d.text === 'string' ? d.text : '';
     if (text) globalVideo.extCaptionActive = true; // 以後は拡張の訳を優先表示
     setVideoCaption(text, false);
+    // 親バーに字幕を出せているので、動画上のオーバーレイ字幕は全画面時のみに切り替える。
+    // iframe再読み込みで設定が消えるため、caption受信のたびに送り直す（冪等）。
+    try { e.source.postMessage({ source: 'tube-summary', type: 'overlay-mode', value: 'fullscreen-only' }, 'https://www.youtube.com'); } catch (err) {}
   });
 
   function createApiPlayer(sec) {
