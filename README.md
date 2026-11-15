@@ -1,6 +1,6 @@
 # YouTube 要約ツール
 
-Windows で YouTube 動画の URL から字幕を取得し、OpenAI API で要約して、ブラウザで読める HTML ページを生成するツールです。
+Windows で YouTube 動画の URL から字幕を取得し、Claude API で要約して、ブラウザで読める HTML ページを生成するツールです。
 
 生成されるページには、要約本文だけでなく、動画リンク、字幕、サムネイル、ストーリーボード画像も含まれます。必要に応じて、通常要約、低コスト要約、詳細要約を使い分けられます。
 
@@ -22,7 +22,7 @@ https://tomosud.github.io/tube_pages/pages/htmls/%E3%83%B4%E3%82%A1%E3%83%AB%E3%
 
 - Windows
 - Python
-- OpenAI API キー
+- Anthropic API キー
 
 ## セットアップ
 
@@ -30,7 +30,7 @@ https://tomosud.github.io/tube_pages/pages/htmls/%E3%83%B4%E3%82%A1%E3%83%AB%E3%
 2. `setup.bat` を実行します。
 3. 仮想環境の作成と必要パッケージのインストールが完了すれば準備完了です。
 
-OpenAI API キーは初回実行時に入力を求められ、`api_key.txt` に暗号化されて保存されます。
+Anthropic API キーは環境変数 `ANTHROPIC_API_KEY` で指定できます。未設定の場合は初回実行時に入力を求められ、`localsettings_anthropic.bin` に暗号化されて保存されます。
 
 ## 使い方
 
@@ -49,21 +49,21 @@ OpenAI API キーは初回実行時に入力を求められ、`api_key.txt` に�
 
 | パス | 役割 | 使用モデル |
 | --- | --- | --- |
-| Stage 1 | 章の切り分けと、各章で落としてはいけない要点の抽出 | `OPENAI_MODEL_STAGE1` |
-| Stage 2 | 章ごとの本文要約（並列） | `OPENAI_MODEL_STAGE2` |
-| Coverage | 元字幕と要約を照合し、不足情報だけを追記 | `OPENAI_MODEL_STAGE1` と同じ |
-| Stage 3 | 全体整合（見出し統一・章統合）とハイライト生成 | `OPENAI_MODEL_STAGE1` と同じ |
-| 補助処理 | Description整理・タイトル翻訳 | `OPENAI_MODEL`。未指定時は `OPENAI_MODEL_STAGE1` と同じ |
+| Stage 1 | 章の切り分けと、各章で落としてはいけない要点の抽出 | `ANTHROPIC_MODEL_STAGE1` |
+| Stage 2 | 章ごとの本文要約（並列） | `ANTHROPIC_MODEL_STAGE2` |
+| Coverage | 元字幕と要約を照合し、不足情報だけを追記 | `ANTHROPIC_MODEL_STAGE1` と同じ |
+| Stage 3 | 全体整合（見出し統一・章統合）とハイライト生成 | `ANTHROPIC_MODEL_STAGE1` と同じ |
+| 補助処理 | Description整理・タイトル翻訳 | `ANTHROPIC_MODEL`。未指定時は `ANTHROPIC_MODEL_STAGE1` と同じ |
 
 各 bat ファイルでのモデル設定は次の通りです。
 
 | ファイル | Stage 1 | Stage 2 |
 | --- | --- | --- |
-| `to_tube_summary.bat` | `gpt-5.6-luna` | `gpt-5.6-luna` |
-| `to_tube_summary_image.bat` | `gpt-5.6-luna` | `gpt-5.6-luna` |
-| `to_tube_summary_cheep.bat` | `gpt-5.4-mini-2026-03-17` | `gpt-5.4-nano-2026-03-17` |
+| `to_tube_summary.bat` | `claude-sonnet-5-5` | `claude-sonnet-5-5` |
+| `to_tube_summary_image.bat` | `claude-sonnet-5-5` | `claude-sonnet-5-5` |
+| `to_tube_summary_cheep.bat` | `claude-haiku-5-5` | `claude-haiku-5-5` |
 
-モデルを変えたい場合は、bat ファイルの `OPENAI_MODEL_STAGE1` / `OPENAI_MODEL_STAGE2` の行を直接書き換えます。
+モデルを変えたい場合は、bat ファイルの `ANTHROPIC_MODEL_STAGE1` / `ANTHROPIC_MODEL_STAGE2` の行を直接書き換えます。
 処理終了時の料金目安は、実際に使ったモデルとキャッシュ入力を分け、Standard料金でモデル別に計算されます。
 
 ### 画像要約モード
@@ -99,7 +99,7 @@ Stage 2の後には元字幕と生成済み要約を章ごとに照合し、結�
 2. 動画タイトルを取得し、出力フォルダを作る
 3. 字幕を取得して `.vtt` ファイルとして保存する
 4. 動画メタ情報、サムネイル、ストーリーボード画像を取得する
-5. OpenAI API で要約を作る（章の切り分け → 章ごとの本文 → 取りこぼし監査 → 全体整合）
+5. Claude API で要約を作る（章の切り分け → 章ごとの本文 → 取りこぼし監査 → 全体整合）
 6. 必要なら詳細解説も追加生成する
 7. 要約結果を `data.js` と `index.html` に変換する
 8. 生成ページをブラウザで開く
@@ -144,7 +144,7 @@ Stage 2の後には元字幕と生成済み要約を章ごとに照合し、結�
 
 利用者目線で主要なものは次の通りです。
 
-- OpenAI API
+- Claude API
   字幕から章立て、要約、ハイライト、詳細解説を生成します。
 - `youtube-transcript-api`
   YouTube 字幕を取得します。
@@ -162,7 +162,7 @@ Stage 2の後には元字幕と生成済み要約を章ごとに照合し、結�
 - `youtube_transcript_downloader.py`
   エントリ本体です。URL 受付、字幕取得、画像取得、要約処理の起動を行います。
 - `ret_youyaku_html.py`
-  OpenAI API を使った要約生成と HTML 出力を担当します。
+  Claude API を使った要約生成と HTML 出力を担当します。
 - `template/index.html`
   生成ページの共通テンプレートです。
 

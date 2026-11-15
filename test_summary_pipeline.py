@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 
-os.environ.setdefault("OPENAI_API_KEY", "test-key")
+os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
 
 import ret_youyaku_html as summary_module  # noqa: E402
 from ret_youyaku_html import (  # noqa: E402
@@ -72,15 +72,9 @@ class Stage3Test(unittest.TestCase):
             ],
             highlights="特徴的なポイント",
         )
-        response = SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(parsed=parsed))]
-        )
+        response = SimpleNamespace(parsed_output=parsed)
         fake_client = SimpleNamespace(
-            beta=SimpleNamespace(
-                chat=SimpleNamespace(
-                    completions=SimpleNamespace(parse=lambda **_kwargs: response)
-                )
-            )
+            messages=SimpleNamespace(parse=lambda **_kwargs: response)
         )
         outline = summary_module._OutlineResult(sections=[
             summary_module._Section(heading="A", start_seconds=0),

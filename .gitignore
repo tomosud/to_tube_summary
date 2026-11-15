@@ -38,6 +38,8 @@ Thumbs.db
 # API Keys
 api_key.txt
 localsettings.bin
+localsettings_anthropic.bin
+localsettings_anthropic.bin.unreadable
 
 
 #other

@@ -4,8 +4,8 @@ cd /d "%~dp0"
 echo === YouTube transcript and image summarizer ===
 echo Reading a YouTube URL from the clipboard...
 
-set OPENAI_MODEL_STAGE1=gpt-5.6-luna
-set OPENAI_MODEL_STAGE2=gpt-5.6-luna
+set ANTHROPIC_MODEL_STAGE1=claude-sonnet-5-5
+set ANTHROPIC_MODEL_STAGE2=claude-sonnet-5-5
 
 :: 代表画像を多めに使い、各章を最大10枚の画像で補足
 if not exist ".\.venv\Scripts\python.exe" (
