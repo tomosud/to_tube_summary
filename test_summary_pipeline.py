@@ -10,6 +10,7 @@ import ret_youyaku_html as summary_module  # noqa: E402
 from ret_youyaku_html import (  # noqa: E402
     _allocate_quotas,
     _clean_model_markdown,
+    chapters_to_section_bounds,
     extract_timestamp,
     markdown_to_html,
     parse_description_chapters,
@@ -57,6 +58,40 @@ class SummaryHelperTest(unittest.TestCase):
         self.assertNotIn("<script>", rendered)
         self.assertIn("&lt;script&gt;", rendered)
         self.assertIn("<b>safe</b>", rendered)
+
+
+def _blocks(count, step=10):
+    return [(i, i * step, f"text{i}") for i in range(count)]
+
+
+class ChaptersToSectionBoundsTest(unittest.TestCase):
+    def test_snaps_to_nearest_block_start(self):
+        bounds = chapters_to_section_bounds(
+            _blocks(30), [(0, "A"), (43, "B"), (152, "C")], 300
+        )
+        self.assertEqual(bounds, [(0, "A", 0), (40, "B", 4), (150, "C", 15)])
+
+    def test_adds_intro_when_first_chapter_starts_late(self):
+        bounds = chapters_to_section_bounds(
+            _blocks(30), [(60, "A"), (120, "B"), (200, "C")], 300
+        )
+        self.assertEqual(bounds[0], (0, "導入", 0))
+        self.assertEqual([b[1] for b in bounds], ["導入", "A", "B", "C"])
+
+    def test_removes_duplicates_after_snapping(self):
+        bounds = chapters_to_section_bounds(
+            _blocks(30), [(0, "A"), (41, "B"), (44, "B2"), (100, "C")], 300
+        )
+        self.assertEqual([b[1] for b in bounds], ["A", "B", "C"])
+        self.assertEqual([b[2] for b in bounds], sorted({b[2] for b in bounds}))
+
+    def test_merges_down_to_forty_sections(self):
+        chapters = [(i * 10, f"C{i}") for i in range(60)]
+        bounds = chapters_to_section_bounds(_blocks(60), chapters, 600)
+        self.assertEqual(len(bounds), 40)
+        self.assertEqual(bounds[0][0], 0)
+        starts = [b[0] for b in bounds]
+        self.assertEqual(starts, sorted(set(starts)))
 
 
 class Stage3Test(unittest.TestCase):

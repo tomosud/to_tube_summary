@@ -519,6 +519,24 @@ def get_vision_mode():
             raise ValueError(f"不正な --vision-mode: {mode}")
     return "off"
 
+def open_in_browser(html_path):
+    """生成ページをHTTPサーバー(serve_pages.py)経由で開く。失敗時は従来のfile://オープン。"""
+    try:
+        import subprocess
+        import serve_pages
+        rel = os.path.relpath(os.path.abspath(html_path), os.path.abspath(serve_pages.ROOT))
+        if rel.startswith("..") or os.path.isabs(rel):
+            raise ValueError("出力先が配信ルート外です")
+        sub = "/".join(urllib.parse.quote(part) for part in rel.split(os.sep))
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "serve_pages.py")
+        subprocess.run([sys.executable, script, "--open", sub], check=True, timeout=30)
+        print("ブラウザでHTMLを開きました(HTTPサーバー経由)")
+    except Exception as e:
+        print(f"HTTP経由で開けなかったためfile://で開きます: {e}")
+        os.startfile(html_path)
+        print("ブラウザでHTMLを開きました")
+
+
 def process_video(url):
     """動画処理のメインロジック"""
     video_id = get_video_id(url)
@@ -601,8 +619,7 @@ def process_video(url):
             print("VTTファイルを削除しました")
             
             # HTMLをブラウザで開く
-            os.startfile(html_path)
-            print("ブラウザでHTMLを開きました")
+            open_in_browser(html_path)
             return True
         except Exception as e:
             print(f"要約処理でエラーが発生しました: {str(e)}")

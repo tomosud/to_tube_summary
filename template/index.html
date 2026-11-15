@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="template-version" content="23">
+<meta name="template-version" content="24">
 <style>
 body{font-family:system-ui,"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;line-height:1.62;padding:.7em 1em;background:#121212;color:#e8e8e8;max-width:840px;margin:0 auto;box-sizing:border-box;font-size:15px;position:relative}
 h1{color:#ff9800;font-size:1.35em;line-height:1.35;border-bottom:1px solid #333;padding-bottom:.2em;margin:.5em 0 .4em}
@@ -91,6 +91,10 @@ html{overflow-x:hidden}
     proxyDomain: 'www.yout-ube.com',
     embedParams: 'autoplay=1&mute=1'
   };
+  // file:// では YouTube embed が origin 無しで再生不可(エラー153)のため従来のプロキシ方式、
+  // http(s) では youtube-nocookie + IFrame API を使う。失敗時はプロキシへフォールバック。
+  var useYouTubeApi = location.protocol !== 'file:';
+  console.log('[player] mode =', useYouTubeApi ? 'youtube-iframe-api' : 'proxy (file://)');
 
   // --- ユーティリティ ---
   function escapeHtml(text) {
@@ -162,6 +166,12 @@ html{overflow-x:hidden}
     shell: null,
     viewport: null,
     iframe: null,
+    apiMount: null,
+    player: null,
+    playerReady: false,
+    pendingSec: null,
+    readyTimeout: null,
+    lastSec: 0,
     source: null,
     profile: null,
     forceDocked: false,
@@ -196,6 +206,9 @@ html{overflow-x:hidden}
     iframe.title = '動画再生';
     iframe.allowFullscreen = true;
     viewport.appendChild(iframe);
+    var apiMount = document.createElement('div');
+    viewport.appendChild(apiMount);
+    iframe.style.display = useYouTubeApi ? 'none' : '';
 
     var close = document.createElement('button');
     close.className = 'global-video-close';
@@ -253,6 +266,7 @@ html{overflow-x:hidden}
     globalVideo.shell = shell;
     globalVideo.viewport = viewport;
     globalVideo.iframe = iframe;
+    globalVideo.apiMount = apiMount;
     globalVideo.caption = caption;
     globalVideo.captionText = captionText;
   }
@@ -349,14 +363,146 @@ html{overflow-x:hidden}
   });
 
   function setIframeProfile(profile) {
-    if (profile.kind === 'filmstrip') {
-      globalVideo.iframe.style.width = '111.111%';
-      globalVideo.iframe.style.height = '111.111%';
-      globalVideo.iframe.style.transform = 'scale(0.9)';
+    var frames = [globalVideo.iframe];
+    if (globalVideo.player && globalVideo.player.getIframe) {
+      try { frames.push(globalVideo.player.getIframe()); } catch (err) {}
+    }
+    for (var i = 0; i < frames.length; i++) {
+      var f = frames[i];
+      if (!f) continue;
+      if (profile.kind === 'filmstrip') {
+        f.style.width = '111.111%';
+        f.style.height = '111.111%';
+        f.style.transform = 'scale(0.9)';
+      } else {
+        f.style.width = '200%';
+        f.style.height = '200%';
+        f.style.transform = 'scale(0.5)';
+      }
+    }
+  }
+
+  // --- YouTube IFrame API 方式 ---
+  var ytApiLoading = false;
+  var ytApiQueue = [];
+
+  function loadYouTubeApi(cb) {
+    if (window.YT && window.YT.Player) { cb(); return; }
+    ytApiQueue.push(cb);
+    if (ytApiLoading) return;
+    ytApiLoading = true;
+    var prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = function() {
+      if (typeof prev === 'function') prev();
+      var q = ytApiQueue; ytApiQueue = [];
+      for (var i = 0; i < q.length; i++) q[i]();
+    };
+    var tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    tag.onerror = function() { fallbackToProxy('iframe_api load failed'); };
+    document.head.appendChild(tag);
+  }
+
+  function stopApiClock() {
+    if (globalVideo.captionTimer) window.clearInterval(globalVideo.captionTimer);
+    globalVideo.captionTimer = null;
+  }
+
+  function startApiClock() {
+    stopApiClock();
+    globalVideo.captionTimer = window.setInterval(function() {
+      if (!globalVideo.player || !globalVideo.playerReady) return;
+      var t = 0;
+      try { t = globalVideo.player.getCurrentTime(); } catch (err) { return; }
+      renderVideoCaption(t);
+    }, 500);
+  }
+
+  function fallbackToProxy(reason) {
+    if (!useYouTubeApi) return;
+    useYouTubeApi = false;
+    console.log('[player] fallback to proxy:', reason);
+    if (globalVideo.readyTimeout) window.clearTimeout(globalVideo.readyTimeout);
+    globalVideo.readyTimeout = null;
+    if (globalVideo.player) {
+      try { globalVideo.player.destroy(); } catch (err) {}
+    }
+    globalVideo.player = null;
+    globalVideo.playerReady = false;
+    globalVideo.pendingSec = null;
+    if (!globalVideo.shell) return;
+    globalVideo.iframe.style.display = '';
+    if (globalVideo.shell.classList.contains('is-visible')) {
+      if (globalVideo.profile) setIframeProfile(globalVideo.profile);
+      armVideoCaption(globalVideo.lastSec);
+      globalVideo.iframe.src = makeVideoLink(baseUrl, Math.floor(globalVideo.lastSec));
+    }
+  }
+
+  function createApiPlayer(sec) {
+    globalVideo.pendingSec = null;
+    globalVideo.readyTimeout = window.setTimeout(function() {
+      if (!globalVideo.playerReady) fallbackToProxy('onReady timeout');
+    }, 8000);
+    loadYouTubeApi(function() {
+      if (!useYouTubeApi || globalVideo.player) return;
+      globalVideo.player = new YT.Player(globalVideo.apiMount, {
+        host: 'https://www.youtube-nocookie.com',
+        videoId: videoId,
+        width: '100%',
+        height: '100%',
+        playerVars: { start: Math.floor(sec), autoplay: 1, mute: 1, playsinline: 1, rel: 0, origin: location.origin },
+        events: {
+          onReady: function() {
+            if (!useYouTubeApi) return;
+            globalVideo.playerReady = true;
+            if (globalVideo.readyTimeout) window.clearTimeout(globalVideo.readyTimeout);
+            globalVideo.readyTimeout = null;
+            var p = globalVideo.player;
+            if (!globalVideo.shell.classList.contains('is-visible')) { p.pauseVideo(); return; }
+            if (globalVideo.profile) setIframeProfile(globalVideo.profile);
+            try { p.unMute(); } catch (err) {}
+            if (globalVideo.pendingSec != null) {
+              p.seekTo(globalVideo.pendingSec, true);
+              globalVideo.pendingSec = null;
+            }
+            p.playVideo();
+          },
+          onStateChange: function(e) {
+            if (!useYouTubeApi) return;
+            if (e.data === 1) {
+              startApiClock();
+              try { if (globalVideo.player.isMuted()) globalVideo.player.unMute(); } catch (err) {}
+            } else if (e.data === 2 || e.data === 0) {
+              stopApiClock();
+              try { renderVideoCaption(globalVideo.player.getCurrentTime()); } catch (err) {}
+            }
+          },
+          onError: function(e) {
+            if (e.data === 101 || e.data === 150 || e.data === 153) fallbackToProxy('onError ' + e.data);
+          }
+        }
+      });
+      if (globalVideo.profile) setIframeProfile(globalVideo.profile);
+    });
+  }
+
+  function playViaApi(sec) {
+    globalVideo.lastSec = sec;
+    clearVideoCaptionTimers();
+    globalVideo.captionStartTime = sec;
+    globalVideo.captionIndex = -1;
+    globalVideo.awaitingPlaybackClick = false;
+    renderVideoCaption(sec);
+    var p = globalVideo.player;
+    if (p && globalVideo.playerReady) {
+      p.seekTo(sec, true);
+      p.unMute();
+      p.playVideo();
+    } else if (p) {
+      globalVideo.pendingSec = sec;
     } else {
-      globalVideo.iframe.style.width = '200%';
-      globalVideo.iframe.style.height = '200%';
-      globalVideo.iframe.style.transform = 'scale(0.5)';
+      createApiPlayer(sec);
     }
   }
 
@@ -504,8 +650,9 @@ html{overflow-x:hidden}
 
   function startGlobalVideo(source, url, profile, forceDocked, startTime) {
     ensureGlobalVideoPlayer();
-    forceDocked = !!forceDocked;
-    if (globalVideo.source === source && globalVideo.iframe.src === url && globalVideo.forceDocked === forceDocked) return;
+    // APIモードは字幕を getCurrentTime() で同期するためクリック位置に出す必要がなく、常に右上dockに表示する。
+    forceDocked = !!forceDocked || useYouTubeApi;
+    if (!useYouTubeApi && globalVideo.source === source && globalVideo.iframe.src === url && globalVideo.forceDocked === forceDocked) return;
     if (globalVideo.source) globalVideo.source.classList.remove('is-playing');
     globalVideo.source = source;
     globalVideo.profile = profile;
@@ -514,6 +661,11 @@ html{overflow-x:hidden}
     setIframeProfile(profile);
     globalVideo.shell.classList.add('is-visible');
     updateGlobalVideoPosition();
+    if (useYouTubeApi && videoId) {
+      playViaApi(Math.max(0, Number(startTime) || 0));
+      return;
+    }
+    globalVideo.lastSec = Math.max(0, Number(startTime) || 0);
     armVideoCaption(startTime);
     // サイズ確定後に特殊watch URLを読み込む。autoplay指定は付けない。
     globalVideo.iframe.src = url;
@@ -528,6 +680,10 @@ html{overflow-x:hidden}
     clearVideoCaptionTimers();
     setVideoCaption('', false);
     if (globalVideo.iframe) globalVideo.iframe.src = '';
+    if (globalVideo.player && globalVideo.playerReady) {
+      try { globalVideo.player.pauseVideo(); } catch (err) {}
+    }
+    globalVideo.pendingSec = null;
     if (globalVideo.shell) {
       globalVideo.shell.classList.remove('is-visible');
       globalVideo.shell.classList.remove('is-docked');
