@@ -752,14 +752,19 @@ def select_images_vision_batch(items, model):
     )
     count_tokens(response, model)
     result = {}
-    for pick in response.parsed_output.picks:
+    picks_list = response.parsed_output.picks
+    for position, pick in enumerate(picks_list):
         item = valid_sections.get(pick.section_index)
-        if item is None or pick.section_index in result:
+        if item is None and len(picks_list) == len(items):
+            # モデルが section_index を 0 始まり等で振り直した場合に備え、
+            # 返却数が一致するときだけ位置で対応付ける。
+            item = items[position]
+        if item is None or item[0] in result:
             continue
         candidates = item[3]
         valid = sorted({i for i in pick.indices if 0 <= i < len(candidates)})
         if valid:
-            result[pick.section_index] = [candidates[i] for i in valid[:_VISION_SELECT_MAX_PICKS]]
+            result[item[0]] = [candidates[i] for i in valid[:_VISION_SELECT_MAX_PICKS]]
     return result
 
 
