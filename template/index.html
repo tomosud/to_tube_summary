@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="template-version" content="26">
+<meta name="template-version" content="27">
 <style>
 body{font-family:system-ui,"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;line-height:1.62;padding:.7em 1em;background:#121212;color:#e8e8e8;max-width:840px;margin:0 auto;box-sizing:border-box;font-size:15px;position:relative}
 h1{color:#ff9800;font-size:1.35em;line-height:1.35;border-bottom:1px solid #333;padding-bottom:.2em;margin:.5em 0 .4em}
@@ -52,6 +52,9 @@ html{overflow-x:hidden}
 .global-video-player iframe{position:absolute;top:0;left:0;border:0;border-radius:6px;transform-origin:top left}
 .global-video-close{position:absolute;z-index:3;top:-11px;right:-11px;width:28px;height:28px;border:1px solid #777;border-radius:50%;background:#202020;color:#fff;font-size:20px;line-height:24px;padding:0;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.7)}
 .global-video-close:hover{background:#444}
+.global-video-cc{position:absolute;z-index:3;top:-11px;right:24px;height:22px;border:1px solid #777;border-radius:11px;background:#202020;color:#ffcc80;font-size:11px;line-height:20px;padding:0 9px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.7);white-space:nowrap}
+.global-video-cc:hover{background:#444}
+.global-video-cc.is-off{color:#888;text-decoration:line-through}
 .global-video-resize{position:absolute;z-index:3;left:-11px;bottom:-11px;width:28px;height:28px;border:1px solid #777;border-radius:50%;background:#202020;color:#ddd;font-size:15px;line-height:25px;padding:0;text-align:center;cursor:nesw-resize;user-select:none;touch-action:none;box-shadow:0 2px 8px rgba(0,0,0,.7)}
 .global-video-resize:hover{background:#444;color:#fff}
 .global-video-caption{position:absolute;z-index:4;left:0;right:0;top:calc(100% + 5px);display:none;justify-content:center;text-align:center;pointer-events:none;color:#d6c65a;font-size:clamp(13px,1.4vw,23px);font-weight:650;line-height:1.45;text-shadow:0 1px 2px #000}
@@ -169,7 +172,7 @@ html{overflow-x:hidden}
   }
 
   function makeEmbedUrl(videoId, timestampSec) {
-    return 'https://www.youtube-nocookie.com/embed/' + videoId + '?start=' + timestampSec + '&autoplay=1&mute=1';
+    return 'https://www.youtube.com/embed/' + videoId + '?start=' + timestampSec + '&autoplay=1&mute=1&cc_load_policy=1';
   }
 
   function extractVideoId(url) {
@@ -308,8 +311,27 @@ html{overflow-x:hidden}
     captionText.className = 'global-video-caption-text';
     caption.appendChild(captionText);
 
+    // 要約ページ側の字幕(黄色DOM字幕)のON/OFF。字幕拡張をiframe内で使うときの
+    // 二重表示を避けるためのトグル。設定はこのブラウザ内でのみ保持する。
+    try { globalVideo.captionEnabled = localStorage.getItem('tts-caption-off') !== '1'; }
+    catch (err) { globalVideo.captionEnabled = true; }
+    var ccToggle = document.createElement('button');
+    ccToggle.className = 'global-video-cc' + (globalVideo.captionEnabled ? '' : ' is-off');
+    ccToggle.type = 'button';
+    ccToggle.setAttribute('aria-label', '要約ページの字幕表示を切り替え');
+    ccToggle.textContent = '字幕';
+    ccToggle.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      globalVideo.captionEnabled = !globalVideo.captionEnabled;
+      ccToggle.classList.toggle('is-off', !globalVideo.captionEnabled);
+      try { localStorage.setItem('tts-caption-off', globalVideo.captionEnabled ? '0' : '1'); } catch (err) {}
+      if (!globalVideo.captionEnabled) setVideoCaption('', false);
+    });
+
     shell.appendChild(viewport);
     shell.appendChild(caption);
+    shell.appendChild(ccToggle);
     shell.appendChild(close);
     shell.appendChild(resize);
     document.body.appendChild(shell);
@@ -330,6 +352,7 @@ html{overflow-x:hidden}
 
   function setVideoCaption(text, hint) {
     if (!globalVideo.caption || !globalVideo.captionText) return;
+    if (globalVideo.captionEnabled === false) text = '';
     globalVideo.captionText.textContent = text || '';
     globalVideo.caption.classList.toggle('is-visible', !!text);
     globalVideo.caption.classList.toggle('is-hint', !!hint);
@@ -497,11 +520,14 @@ html{overflow-x:hidden}
     loadYouTubeApi(function() {
       if (!useYouTubeApi || globalVideo.player) return;
       globalVideo.player = new YT.Player(globalVideo.apiMount, {
-        host: 'https://www.youtube-nocookie.com',
+        // www.youtube.com ホスト: 字幕拡張(YouTube Lean English)のcontent scriptが
+        // embed iframe内で動ける対象にするため。cc_load_policy=1 で字幕を最初からON
+        // にする（拡張は字幕トラックの取得を起点に動作する）。
+        host: 'https://www.youtube.com',
         videoId: videoId,
         width: '100%',
         height: '100%',
-        playerVars: { start: Math.floor(sec), autoplay: 1, mute: 1, playsinline: 1, rel: 0, origin: location.origin },
+        playerVars: { start: Math.floor(sec), autoplay: 1, mute: 1, playsinline: 1, rel: 0, cc_load_policy: 1, origin: location.origin },
         events: {
           onReady: function() {
             if (!useYouTubeApi) return;
@@ -509,6 +535,15 @@ html{overflow-x:hidden}
             if (globalVideo.readyTimeout) window.clearTimeout(globalVideo.readyTimeout);
             globalVideo.readyTimeout = null;
             var p = globalVideo.player;
+            // 字幕拡張の読み上げ(iframe内のAudio再生)が自動再生制限に当たらないよう
+            // allow属性にautoplayを保証する。
+            try {
+              var fr = p.getIframe();
+              var allowAttr = fr.getAttribute('allow') || '';
+              if (allowAttr.indexOf('autoplay') === -1) {
+                fr.setAttribute('allow', (allowAttr ? allowAttr + '; ' : '') + 'autoplay');
+              }
+            } catch (err) {}
             if (!globalVideo.shell.classList.contains('is-visible')) { p.pauseVideo(); return; }
             if (globalVideo.profile) setIframeProfile(globalVideo.profile);
             try { p.unMute(); } catch (err) {}
