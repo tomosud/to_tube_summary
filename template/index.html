@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="template-version" content="25">
+<meta name="template-version" content="26">
 <style>
 body{font-family:system-ui,"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;line-height:1.62;padding:.7em 1em;background:#121212;color:#e8e8e8;max-width:840px;margin:0 auto;box-sizing:border-box;font-size:15px;position:relative}
 h1{color:#ff9800;font-size:1.35em;line-height:1.35;border-bottom:1px solid #333;padding-bottom:.2em;margin:.5em 0 .4em}
@@ -1261,6 +1261,14 @@ html{overflow-x:hidden}
   }
 
   buildFilmstrip();
+  // ウィンドウ幅の変化（ズーム含む）でレールを作り直す。読み込み時に幅が
+  // 足りなかった場合でも、広げれば表示される。
+  var filmstripResizeTimer = null;
+  window.addEventListener('resize', function() {
+    clearTimeout(filmstripResizeTimer);
+    filmstripResizeTimer = setTimeout(buildFilmstrip, 250);
+  });
+  window.__rebuildFilmstrip = buildFilmstrip; // デバッグ・検証用
   // 画像読込でレイアウトが確定した後に再計算（アンカーY座標がずれるため）
   window.addEventListener('load', buildFilmstrip);
 
